@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/src/Addons/">
     <Project Path="src/Addons/PowerShellRepackager.ApplicationInsights.Stub/PowerShellRepackager.ApplicationInsights.Stub.csproj" />
+    <Project Path="src/Addons/PowerShellRepackager.GenericLoader/PowerShellRepackager.GenericLoader.csproj" />
   </Folder>
 </Solution>

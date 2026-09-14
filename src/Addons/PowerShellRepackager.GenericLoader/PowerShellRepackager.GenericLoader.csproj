@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFramework>net8.0</TargetFramework>
+	<ImplicitUsings>enable</ImplicitUsings>
+	<AssemblyName>Svrooij.PowerShellRepackager.GenericLoader</AssemblyName>
+	<RootNamespace>Svrooij.PowerShellRepackager.GenericLoader</RootNamespace>
+
+	<Nullable>enable</Nullable>
+	<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+	<!-- Generic loader should have no external runtime dependencies to avoid conflicts -->
+	<GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+	<!-- Compile-time only reference for System.Management.Automation. -->
+	<!-- This keeps the loader assembly free of any runtime dependency that could conflict. -->
+	<PackageReference Include="PowerShellStandard.Library" Version="5.1.1" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
