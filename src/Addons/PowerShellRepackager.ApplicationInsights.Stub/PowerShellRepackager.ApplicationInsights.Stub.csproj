@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFramework>net8.0</TargetFramework>
+	<ImplicitUsings>enable</ImplicitUsings>
+	<AssemblyName>Microsoft.ApplicationInsights</AssemblyName>
+	<RootNamespace>Microsoft.ApplicationInsights</RootNamespace>
+	<Nullable>enable</Nullable>
+	<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+	<!-- Match a common version of ApplicationInsights for compatibility -->
+	<AssemblyVersion>2.21.0.0</AssemblyVersion>
+	<FileVersion>2.21.0.0</FileVersion>
+	<Version>2.21.0</Version>
+	<Title>Microsoft Application Insights - No-Op Stub</Title>
+	<Description>No-op stub implementation of Microsoft Application Insights for neutralizing telemetry in repackaged PowerShell modules.</Description>
+  </PropertyGroup>
+
+</Project>

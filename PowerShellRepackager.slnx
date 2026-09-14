@@ -7,4 +7,7 @@
     <Project Path="src/PowerShellRepackager.Loader/PowerShellRepackager.Loader.csproj" />
     <Project Path="src/PowerShellRepackager/PowerShellRepackager.csproj" />
   </Folder>
+  <Folder Name="/src/Addons/">
+    <Project Path="src/Addons/PowerShellRepackager.ApplicationInsights.Stub/PowerShellRepackager.ApplicationInsights.Stub.csproj" />
+  </Folder>
 </Solution>

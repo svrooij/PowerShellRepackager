@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
-	  <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+	<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.12" />
     <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.4.11" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Svrooij.PowerShell.DI" Version="1.3.4" />
@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PowerShellRepackager.Loader\PowerShellRepackager.Loader.csproj" />
+    <ProjectReference Include="..\Addons\PowerShellRepackager.ApplicationInsights.Stub\PowerShellRepackager.ApplicationInsights.Stub.csproj" />
   </ItemGroup>
 
   <Target Name="MoveDependenciesToSubfolder" AfterTargets="Build">
