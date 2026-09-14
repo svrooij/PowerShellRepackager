@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="LICENSE.txt" />
+    <File Path="PLAN.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/PowerShellRepackager.Loader/PowerShellRepackager.Loader.csproj" />
+    <Project Path="src/PowerShellRepackager/PowerShellRepackager.csproj" />
+  </Folder>
+</Solution>

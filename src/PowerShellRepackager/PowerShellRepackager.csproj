@@ -1,0 +1,84 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>PowerShellRepackager</AssemblyName>
+	  <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	  <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <NoWarn>CS8618</NoWarn>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <PowerShellDocsFile>PowerShellRepackager.dll-Help.xml</PowerShellDocsFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+	  <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="10.0.12" />
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.4.11" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Svrooij.PowerShell.DI" Version="1.3.4" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
+    <PackageReference Include="System.Text.Json" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PowerShellRepackager.Loader\PowerShellRepackager.Loader.csproj" />
+  </ItemGroup>
+
+  <Target Name="MoveDependenciesToSubfolder" AfterTargets="Build">
+    <ItemGroup>
+        <DependencyDlls Include="$(OutputPath)*.dll" Exclude="$(OutputPath)PowerShellRepackager.dll;$(OutputPath)PowerShellRepackager.Loader.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutputPath)Dependencies" />
+    <Move SourceFiles="@(DependencyDlls)" DestinationFolder="$(OutputPath)Dependencies" />
+    <!-- ref/ contains compilation-only reference assemblies; runtimes/ contains RID-specific
+          native binaries already provided by the PowerShell 7 (.NET 8) host process.
+          Neither is needed to load or run the module. -->
+    <RemoveDir Directories="$(OutputPath)ref" />
+    <RemoveDir Directories="$(OutputPath)runtimes" />
+  </Target>
+
+  <Target Name="GenerateDocumentation" AfterTargets="AfterBuild" Outputs="$(PowerShellDocsFile)" Condition="!Exists($(PowerShellDocsFile))">
+    <Message Text="Generating $(PowerShellDocsFile)" Importance="high" />
+    <Message Text="Project path $(ProjectDir)" Importance="high" />
+    <Message Text="Output path $(OutputPath)" Importance="high" />
+    <Exec Command="dotnet pwsh-docs --dll $(ProjectDir)$(OutputPath)\PowerShellRepackager.dll --use-xml-docs --maml-file $(ProjectDir)\$(PowerShellDocsFile)" />
+    <Copy SourceFiles="$(ProjectDir)$(PowerShellDocsFile)" DestinationFolder="$(OutputPath)" />
+    <OnError ExecuteTargets="DocsGenerationError" />
+  </Target>
+  <Target Name="DocsGenerationError">
+    <Error Text="Documentation could not be generated" />
+  </Target>
+  <Target Name="RemoveDocumentation" AfterTargets="CoreClean">
+    <Delete Files="$(PowerShellDocsFile)" />
+  </Target>
+
+  <!-- Delete the intermediate XML doc file once GenerateDocumentation has consumed it.
+        AfterTargets="GenerateDocumentation" is evaluated at plan time, so this target
+        still runs on incremental builds where GenerateDocumentation is skipped by its
+        Condition (the XML is regenerated every build and is not needed in the output). -->
+  <Target Name="RemoveXmlDocumentation" AfterTargets="GenerateDocumentation">
+    <Delete Files="$(OutputPath)$(AssemblyName).xml" />
+    <Delete Files="$(OutputPath)$(AssemblyName).deps.json" />
+    <Delete Files="$(OutputPath)*.pdb" Condition="'$(Configuration)' == 'Release'" /> <!-- Only delete PDBs for release builds, as they are useful for debugging in development builds. -->
+  </Target>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Link="README.md">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="PowerShellRepackager.dll-Help.xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="PowerShellRepackager.psd1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="PowerShellRepackager.psm1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

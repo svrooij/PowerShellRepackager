@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Start in PowerShell Core": {
+      "executablePath": "pwsh.exe",
+      "commandName": "Executable",
+      "commandLineArgs": "-noexit -command &{ Import-Module .\\PowerShellRepackager.psd1 -Verbose}",
+      "workingDirectory": "$(TargetDir)"
+    }
+  }
+}
