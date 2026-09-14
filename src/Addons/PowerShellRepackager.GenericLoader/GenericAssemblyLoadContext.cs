@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 
@@ -9,8 +11,9 @@ namespace Svrooij.PowerShellRepackager.GenericLoader;
 /// </summary>
 /// <remarks>
 /// This ALC is configured at runtime via <see cref="LoaderConfiguration"/>.
-/// It loads only the assemblies explicitly listed in the configuration from the module's bin folder,
-/// allowing all other assembly requests to fall through to the Default ALC.
+/// All bundled assemblies are consolidated into a flat bin/ folder in the repackaged module.
+/// The loader loads all DLLs from that single folder, allowing all other assembly requests
+/// to fall through to the Default ALC.
 /// This ensures that framework assemblies (System.*, System.Management.Automation) and
 /// PowerShell SDK assemblies remain resolvable from the Default ALC, maintaining type compatibility.
 /// </remarks>
@@ -28,7 +31,7 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     /// Used to compute the relative path to the module's bin folder.
     /// </param>
     /// <exception cref="ArgumentException">
-    /// Thrown if the loader assembly location is invalid or the bin directory does not exist.
+    /// Thrown if the loader assembly location is invalid or required directories do not exist.
     /// </exception>
     internal GenericAssemblyLoadContext(LoaderConfiguration config, string loaderAssemblyLocation)
         : base($"Svrooij_{config.ModuleName}_ALC", isCollectible: false)
@@ -38,30 +41,32 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
         if (string.IsNullOrEmpty(loaderAssemblyLocation))
             throw new ArgumentException("Loader assembly location cannot be null or empty.", nameof(loaderAssemblyLocation));
 
-        // Compute the bin directory relative to where this loader DLL is placed.
-        // Expected layout: module/bin/{TargetFramework}/Svrooij.PowerShellRepackager.GenericLoader.dll
-        // So we go up from the loader's directory to find bin/{TargetFramework}.
+        // Compute path to the bin folder relative to where this loader DLL is placed.
+        // Expected layout after repackaging:
+        //   module/
+        //     bin/              (all DLLs consolidated here)
+        //     loader.dll
+        //     MicrosoftTeams.psd1
+        //     ... other module files ...
+        //
         string? loaderDir = Path.GetDirectoryName(loaderAssemblyLocation);
         if (loaderDir == null)
             throw new ArgumentException($"Cannot determine directory for loader assembly at '{loaderAssemblyLocation}'.", nameof(loaderAssemblyLocation));
 
-        // The loader is placed directly in bin/{TargetFramework}/, so the parent is the bin directory.
-        string? binDir = Path.GetDirectoryName(loaderDir);
-        if (binDir == null)
-            throw new ArgumentException($"Cannot determine bin directory from loader path '{loaderAssemblyLocation}'.", nameof(loaderAssemblyLocation));
+        // The bin folder is typically in the same directory as the loader (module root)
+        _binDirectory = Path.Combine(loaderDir, "bin");
 
-        _binDirectory = Path.Combine(binDir, config.TargetFramework);
-
+        // Warn if bin directory doesn't exist, but don't fail (allow for flexible deployment scenarios)
         if (!Directory.Exists(_binDirectory))
         {
-            throw new ArgumentException(
-                $"Bin directory does not exist: '{_binDirectory}'. Expected layout: bin/{config.TargetFramework}/",
-                nameof(config));
+            System.Diagnostics.Debug.WriteLine(
+                $"Warning: Bin directory '{_binDirectory}' does not exist. " +
+                $"Module may not load correctly. Expected location: {_binDirectory}");
         }
     }
 
     /// <summary>
-    /// Preloads the specified assemblies into this ALC.
+    /// Preloads the specified assemblies into this ALC from the bin folder.
     /// This ensures they are available before any code that depends on them runs.
     /// </summary>
     /// <param name="assemblyNames">The simple names of assemblies to preload (without .dll extension).</param>
@@ -87,7 +92,7 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// Resolves an assembly strictly from the module's bin folder, returning null if not found.
+    /// Resolves an assembly from the bin folder, returning null if not found.
     /// Unlike <see cref="LoadFromAssemblyName"/>, this never falls back to the Default ALC,
     /// which would re-trigger the Default.Resolving event and cause infinite recursion.
     /// </summary>
@@ -103,7 +108,7 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// Overrides the load mechanism to resolve assemblies from the module's bin folder.
+    /// Overrides the load mechanism to resolve assemblies from the flat bin/ folder.
     /// All .dll files in the bin folder are automatically discovered and loaded.
     /// If not found in the folder, returns null to let the Default ALC handle it.
     /// </summary>

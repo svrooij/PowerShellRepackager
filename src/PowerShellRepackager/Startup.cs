@@ -10,7 +10,17 @@ public class Startup : PsStartup
     /// <inheritdoc/>
     public override void ConfigureServices(IServiceCollection services)
     {
-        
+        // Add HttpClient with a longer timeout for downloading large modules
+        services.AddSingleton<HttpClient>((_) =>
+        {
+            var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(180); // For downloading large modules
+            return httpClient;
+        });
+
+        // Mechanics for doing the actual work of downloading and repackaging modules
+        services.AddTransient<Mechanics.PackageDownloader>();
+        services.AddTransient<Mechanics.PackageExtractor>();
     }
 
     /// <inheritdoc/>

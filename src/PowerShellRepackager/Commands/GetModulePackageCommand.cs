@@ -37,45 +37,26 @@ public partial class GetModulePackageCommand : DependencyCmdlet<Startup>
     [Parameter(Mandatory = false, Position = 2, ValueFromPipeline = true)]
     public SwitchParameter Force { get; set; }
 
+    // Service dependencies are automatically injected by the DI framework when the cmdlet is instantiated.
+    [ServiceDependency(Required = true)]
+    private Mechanics.PackageDownloader _packageDownloader;
+
     [ServiceDependency(Required = true)]
     private ILogger<GetModulePackageCommand> _logger;
 
     /// <inheritdoc />
     public override async Task ProcessRecordAsync(CancellationToken cancellationToken)
     {
-        var fileName = $"{ModuleName}.{Version}.nupkg";
-        var filePath = Path.Combine(Path.GetTempPath(), "PowerShellRepackager", fileName);
-        var directoryPath = Path.GetDirectoryName(filePath);
-        if (!Directory.Exists(directoryPath!))
+        try
         {
-            Directory.CreateDirectory(directoryPath!);
+            var filePath = await _packageDownloader.DownloadPackageAsync(ModuleName, Version, Force.IsPresent, cancellationToken);
+            WriteObject(filePath);
         }
-        if (File.Exists(filePath))
-        {
-            if (!Force.IsPresent)
-            {
-                _logger.LogInformation("Module package {FilePath} already exists. Skipping download.", filePath);
-                WriteObject(filePath);
-                return;
-            }
-            else
-            {
-                _logger.LogInformation("Module package {FilePath} already exists. Overwriting due to -Force parameter.", filePath);
-            }
-        }
-        using var httpclient = new HttpClient();
-        var url = $"https://www.powershellgallery.com/api/v2/package/{ModuleName}/{Version}";
-        var response = await httpclient.GetAsync(url, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError("Failed to get module package from {Url}. Status code: {StatusCode}", url, response.StatusCode);
-            WriteError(new ErrorRecord(new Exception($"Failed to get module package from {url}. Status code: {response.StatusCode}"), "GetModulePackageFailed", ErrorCategory.InvalidOperation, null));
+        catch (HttpRequestException ex) { 
+            _logger.LogError("Failed to get module package, status code: {StatusCode}", ex.StatusCode);
+            WriteError(new ErrorRecord(ex, "GetModulePackageFailed", ErrorCategory.InvalidOperation, null));
             return;
         }
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        
-        using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await stream.CopyToAsync(fileStream, cancellationToken);
-        WriteObject(filePath);
     }
 }
+

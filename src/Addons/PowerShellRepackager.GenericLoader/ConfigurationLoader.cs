@@ -58,9 +58,6 @@ internal static class ConfigurationLoader
         if (string.IsNullOrWhiteSpace(config.ModuleName))
             throw new InvalidOperationException("LoaderConfiguration.ModuleName is required and cannot be null or whitespace.");
 
-        if (string.IsNullOrWhiteSpace(config.TargetFramework))
-            throw new InvalidOperationException("LoaderConfiguration.TargetFramework is required and cannot be null or whitespace.");
-
         if (config.PreloadAssemblies == null || config.PreloadAssemblies.Length == 0)
             throw new InvalidOperationException("LoaderConfiguration.PreloadAssemblies must be a non-empty array.");
     }

@@ -11,7 +11,7 @@ Unlike the module-specific `PowerShellRepackager.Loader` (which is hardcoded for
 ### Components
 
 1. **`GenericAssemblyLoadContext`** — The custom ALC that:
-   - Discovers and loads all `.dll` files in the module's `bin/{TargetFramework}/` folder
+   - Discovers and loads all `.dll` files in the module's `bin/` folder
    - Returns `null` for assemblies not found (falls through to Default ALC)
    - Allows framework and PowerShell SDK assemblies to remain compatible
 
@@ -25,7 +25,6 @@ Unlike the module-specific `PowerShellRepackager.Loader` (which is hardcoded for
 
 3. **`LoaderConfiguration`** — A data class defining:
    - `ModuleName` — The repackaged module name (e.g., "Svrooij.MicrosoftTeams")
-   - `TargetFramework` — The .NET TFM folder (e.g., "net8.0", "netcore3.1")
    - `PreloadAssemblies` — Array of assemblies to eagerly preload at import time
    - Optional metadata: original module name/version, repackage date, tool version
 
@@ -42,17 +41,24 @@ When repackaging a module (e.g., MicrosoftTeams):
 ```
 Repackage MicrosoftTeams
   ↓
+Extract .nupkg and normalize:
+  - Collect all assemblies from flat /bin and selected TFM folder
+  - Total: 74 assemblies (7 flat + 67 TFM-specific)
+  ↓
+Consolidate into single flat /bin folder:
+  - Copy all 74 DLLs to: output_module/bin/
+  - No TFM-specific subfolders in output
+  ↓
 Generate loader-config.json with:
   - moduleName: "Svrooij.MicrosoftTeams"
-  - targetFramework: "net8.0"
-  - isolatedAssemblies: ["Microsoft.Identity.Client", "Newtonsoft.Json", ...]
-  - preloadAssemblies: [subset of isolatedAssemblies, prioritizing critical deps]
+  - preloadAssemblies: [subset of DLLs, prioritizing critical deps]
+  - Optional: originalModuleName, originalModuleVersion (traceability)
   ↓
 Copy prebuilt Svrooij.PowerShellRepackager.GenericLoader.dll to:
-  module_output/bin/net8.0/
+  output_module/bin/
   ↓
 Rewrite module manifest (Svrooij.MicrosoftTeams.psd1):
-  - RootModule points to loader DLL
+  - RootModule points to loader DLL (in same bin/ folder)
   - ModuleInitializer set to GenericModuleInitializer
 ```
 
@@ -63,39 +69,39 @@ When user imports the repackaged module:
 ```powershell
 Import-Module Svrooij.MicrosoftTeams
   ↓
-PowerShell loads Svrooij.PowerShellRepackager.GenericLoader.dll
+PowerShell loads Svrooij.PowerShellRepackager.GenericLoader.dll from bin/
   ↓
 Invokes GenericModuleInitializer.OnImport()
   ↓
   [In OnImport]
-  1. Reads loader-config.json from same directory as loader DLL
+  1. Reads loader-config.json from same directory as loader DLL (bin/)
   2. Creates GenericAssemblyLoadContext with module-specific config
-  3. Calls Preload() for critical assemblies
+  3. Calls Preload() for critical assemblies (from bin/)
   4. Registers OnResolving() callback with Default ALC
   5. Returns control to PowerShell
   ↓
-PowerShell imports the actual module's root module/binary cmdlets
+PowerShell imports the actual module's root module/cmdlets/functions
   ↓
-When module code requests isolated assemblies:
+When module code requests assemblies:
   - Default ALC.Resolving event fires
-  - OnResolving() checks if assembly is in isolatedAssemblies
-  - If yes, loads from module's private ALC bin folder
-  - If no, returns null (lets framework/SDK assemblies resolve from Default)
+  - OnResolving() tries to load from the private ALC first
+  - Private ALC checks bin/ folder for the assembly
+  - If found: loads from private ALC (isolated from other modules)
+  - If not found: returns null (framework/SDK assemblies resolve from Default ALC)
   ↓
-Module import completes successfully with all dependencies isolated
+Module import completes successfully with all 74 DLLs isolated in private ALC
 ```
 
 ## Configuration File Format
 
 **File name:** `loader-config.json`  
-**Location:** Alongside the loader DLL in `bin/{TargetFramework}/`
+**Location:** Alongside the loader DLL in the same directory (e.g., `output_module/bin/`)
 
 **Example:**
 
 ```json
 {
   "moduleName": "Svrooij.MicrosoftTeams",
-  "targetFramework": "net8.0",
   "preloadAssemblies": [
 	"Microsoft.Identity.Client",
 	"Newtonsoft.Json",
@@ -110,19 +116,20 @@ Module import completes successfully with all dependencies isolated
 
 ### Field Descriptions
 
-- **`moduleName`** *(required)* — The repackaged module name. Used to create a recognizable ALC name for diagnostics.
-- **`targetFramework`** *(required)* — The .NET TFM folder (must exist as a subdirectory of `bin/`).
-- **`preloadAssemblies`** *(required)* — Array of assembly simple names (without .dll extension) to load eagerly during initialization. All other DLLs in the folder are loaded lazily on first request.
-- **`originalModuleName`** *(optional)* — The original module name before repackaging (for traceability).
-- **`originalModuleVersion`** *(optional)* — The original module version before repackaging (for traceability).
+- **`moduleName`** *(required)* — The repackaged module name. Used to create a recognizable ALC name for diagnostics (e.g., `Svrooij_Svrooij.MicrosoftTeams_ALC`).
+- **`preloadAssemblies`** *(required)* — Array of assembly simple names (without .dll extension) to load eagerly during initialization. These are loaded immediately in `OnImport()` to ensure they're available before any static constructors run. All other DLLs in `bin/` are loaded lazily on first request.
+- **`originalModuleName`** *(optional)* — The original module name before repackaging (for traceability and audit logs).
+- **`originalModuleVersion`** *(optional)* — The original module version before repackaging (for traceability and audit logs).
 - **`repackageDate`** *(optional)* — ISO 8601 timestamp of when this module was repackaged.
 - **`toolVersion`** *(optional)* — Version of PowerShellRepackager that created this configuration.
+
+**Note:** There is no `targetFramework` field because all assemblies in the repackaged module are consolidated into a single flat `/bin/` folder, regardless of their original TFM origin.
 
 ## Key Design Decisions
 
 ### 1. **Folder-Based Discovery, Not Allow-List**
 
-All `.dll` files in the module's `bin/{TargetFramework}/` folder are automatically discovered and available for loading from the private ALC. There is no explicit allow-list of assembly names.
+All `.dll` files in the module's `bin/` folder are automatically discovered and available for loading from the private ALC. There is no explicit allow-list of assembly names.
 
 **Benefits:**
 - Automatically captures all dependencies (including transitive ones)
@@ -161,18 +168,40 @@ This keeps the repackager simple and fast.
 
 ## Deployment
 
-### For the Repackager
+### For the Repackager Tool
 
-The compiled `Svrooij.PowerShellRepackager.GenericLoader.dll` is built once and then embedded / bundled with the PowerShellRepackager tool.
+The compiled `Svrooij.PowerShellRepackager.GenericLoader.dll` is built once and then bundled/embedded with the PowerShellRepackager tool as a prebuilt resource. It is reused for all repackaged modules (no per-module compilation).
 
 ### For Each Repackaged Module
 
 When repackaging a module (e.g., MicrosoftTeams → Svrooij.MicrosoftTeams):
 
-1. Copy the prebuilt loader DLL to the output module's `bin/{TargetFramework}/` folder
-2. Generate `loader-config.json` in the same location with module-specific assembly lists
-3. Rewrite the module manifest to point to the loader DLL as the RootModule
-4. Package the module as usual
+**Output Structure:**
+```
+Svrooij.MicrosoftTeams/
+  bin/
+    (all 74 DLLs consolidated here)
+    Svrooij.PowerShellRepackager.GenericLoader.dll
+    loader-config.json
+  Svrooij.MicrosoftTeams.psd1    (rewritten manifest)
+  Svrooij.MicrosoftTeams.psm1
+  ... other module files ...
+```
+
+**Steps:**
+
+1. Extract original `.nupkg` and discover available TFMs
+2. Select the highest-priority compatible TFM (e.g., `netcore3.1` from `netcoreapp3.1`)
+3. Collect all assemblies from:
+   - Flat `/bin` folder (shared DLLs)
+   - Selected TFM folder (version-specific DLLs)
+4. Consolidate all DLLs into output `bin/` folder
+5. Copy prebuilt `Svrooij.PowerShellRepackager.GenericLoader.dll` to `bin/`
+6. Generate `loader-config.json` in `bin/`
+7. Rewrite module manifest to:
+   - Point RootModule to the loader DLL
+   - Set ModuleInitializer to `Svrooij.PowerShellRepackager.GenericLoader.GenericModuleInitializer`
+8. Package the module as usual
 
 ## Testing
 
@@ -181,20 +210,31 @@ To test the generic loader with a repackaged module:
 1. **Build the loader:** `dotnet build src/Addons/PowerShellRepackager.GenericLoader/`
 2. **Create a test module:** Structure it as:
    ```
-   TestModule/
+   Svrooij.TestModule/
    ├── bin/
-   │   └── net8.0/
-   │       ├── Svrooij.PowerShellRepackager.GenericLoader.dll
-   │       ├── loader-config.json
-   │       ├── TestModule.dll (or .psm1)
-   │       └── [other module DLLs]
-   ├── TestModule.psd1 (manifest rewritten to use loader)
+   │   ├── Svrooij.PowerShellRepackager.GenericLoader.dll
+   │   ├── loader-config.json
+   │   ├── TestModule.dll (or .psm1 for root module)
+   │   └── [all other module DLLs consolidated here]
+   ├── Svrooij.TestModule.psd1 (manifest rewritten to use loader)
+   ├── Svrooij.TestModule.psm1
+   └── ... other module files ...
    ```
-3. **Import and test:**
+3. **Generate loader-config.json** with:
+   ```json
+   {
+     "moduleName": "Svrooij.TestModule",
+     "preloadAssemblies": ["critical-dep-1", "critical-dep-2"],
+     "originalModuleName": "TestModule",
+     "originalModuleVersion": "1.0.0"
+   }
+   ```
+4. **Import and test:**
    ```powershell
-   Import-Module ./TestModule
+   Import-Module ./Svrooij.TestModule
    Get-Module | Format-Table
    # Verify no DLL conflicts, commands are available
+   # Check that ALC is created: $alc = [System.Runtime.Loader.AssemblyLoadContext]::CurrentContextualReflectionContext
    ```
 
 ## Future Enhancements
