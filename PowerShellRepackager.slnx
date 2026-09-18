@@ -11,4 +11,7 @@
     <Project Path="src/Addons/PowerShellRepackager.ApplicationInsights.Stub/PowerShellRepackager.ApplicationInsights.Stub.csproj" />
     <Project Path="src/Addons/PowerShellRepackager.GenericLoader/PowerShellRepackager.GenericLoader.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PowerShellRepackager.Tests/PowerShellRepackager.Tests.csproj" />
+  </Folder>
 </Solution>

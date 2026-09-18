@@ -61,7 +61,8 @@
     # Cmdlets to export from this module.
     CmdletsToExport = @(
         'Get-ModulePackage',
-        'Expand-ModulePackage'
+        'Expand-ModulePackage',
+        'Publish-RepackagedModule'
     )
 
     # Variables to export from this module.

@@ -28,6 +28,44 @@
     <ProjectReference Include="..\PowerShellRepackager.Loader\PowerShellRepackager.Loader.csproj" />
     <ProjectReference Include="..\Addons\PowerShellRepackager.ApplicationInsights.Stub\PowerShellRepackager.ApplicationInsights.Stub.csproj" />
   </ItemGroup>
+	<ItemGroup>
+		<None Remove="Resources\Svrooij.PowerShellRepackager.GenericLoader.dll" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="Resources\Svrooij.PowerShellRepackager.GenericLoader.dll" Link="Resources/Svrooij.PowerShellRepackager.GenericLoader.dll" />
+	</ItemGroup>
+
+  <PropertyGroup>
+    <GenericLoaderProjectPath>$(MSBuildThisFileDirectory)..\Addons\PowerShellRepackager.GenericLoader\PowerShellRepackager.GenericLoader.csproj</GenericLoaderProjectPath>
+    <GenericLoaderBuildPath>$(MSBuildThisFileDirectory)..\Addons\PowerShellRepackager.GenericLoader\bin\Release\net8.0\</GenericLoaderBuildPath>
+    <GenericLoaderDllName>Svrooij.PowerShellRepackager.GenericLoader.dll</GenericLoaderDllName>
+    <!-- Use relative path for embedding -->
+    <EmbeddedLoaderRelativePath>Resources\</EmbeddedLoaderRelativePath>
+    <EmbeddedLoaderResourcePath>$(ProjectDir)$(EmbeddedLoaderRelativePath)</EmbeddedLoaderResourcePath>
+    <EmbeddedLoaderDllPath>$(EmbeddedLoaderResourcePath)\$(GenericLoaderDllName)</EmbeddedLoaderDllPath>
+  </PropertyGroup>
+
+  <!-- Build and copy the generic loader BEFORE compile -->
+  <Target Name="PrepareGenericLoader" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists($(EmbeddedLoaderDllPath))" Outputs="$(EmbeddedLoaderDllPath)">
+    <!-- Build the generic loader project in Release configuration -->
+    <Exec Command="dotnet build &quot;$(GenericLoaderProjectPath)&quot; -c Release -f net8.0" ContinueOnError="true" />
+
+    <!-- Create the resources directory -->
+    <MakeDir Directories="$(EmbeddedLoaderResourcePath)" />
+
+    <!-- Copy the built DLL to the project's Resources folder -->
+    <Copy SourceFiles="$(GenericLoaderBuildPath)$(GenericLoaderDllName)" DestinationFolder="$(EmbeddedLoaderResourcePath)" SkipUnchangedFiles="true" />
+
+    <Message Text="✓ Copied generic loader to $(EmbeddedLoaderResourcePath)" Importance="high" Condition="Exists('$(EmbeddedLoaderDllPath)')" />
+    <!-- Add the loader to EmbeddedResource items collection just before compilation -->
+  </Target>
+
+  <!-- Clean up embedded loaders on clean -->
+  <Target Name="CleanEmbeddedLoaders" AfterTargets="Clean">
+    <RemoveDir Directories="$(EmbeddedLoaderResourcePath)" />
+    <Message Text="Cleaned up embedded loaders directory" Importance="high" />
+  </Target>
 
   <Target Name="MoveDependenciesToSubfolder" AfterTargets="Build">
     <ItemGroup>

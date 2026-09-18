@@ -109,7 +109,7 @@ internal class PackageExtractor
     private ModulePackageInfo NormalizeExtractedPackage(string moduleName, string version, string extractedPath)
     {
         // Find the manifest file
-        var manifestFile = FindManifestFile(extractedPath);
+        var manifestFile = FindManifestFile(extractedPath, moduleName);
         if (manifestFile == null)
             throw new InvalidOperationException($"No module manifest (.psd1) found in {extractedPath}");
 
@@ -143,7 +143,7 @@ internal class PackageExtractor
         ScanDirectoryForFiles(extractedPath, selectedTfm, files);
 
         // Scan root and lib for other content
-        ScanDirectoryForScriptsAndData(extractedPath, files);
+        ScanDirectoryForScriptsAndData(extractedPath, manifestFile.FullPath, files);
 
         return new ModulePackageInfo
         {
@@ -157,14 +157,28 @@ internal class PackageExtractor
 
     /// <summary>
     /// Finds the module manifest file (.psd1).
+    /// Prefers the manifest matching the module name (e.g. MicrosoftTeams.psd1), since packages
+    /// may ship additional manifests for nested/sub modules.
     /// </summary>
-    private ModuleFile? FindManifestFile(string extractedPath)
+    private ModuleFile? FindManifestFile(string extractedPath, string moduleName)
     {
         var manifestFiles = Directory.GetFiles(extractedPath, "*.psd1", SearchOption.TopDirectoryOnly);
         if (manifestFiles.Length == 0)
             return null;
 
-        var manifestPath = manifestFiles[0];
+        var manifestPath = manifestFiles.FirstOrDefault(f =>
+            Path.GetFileNameWithoutExtension(f).Equals(moduleName, StringComparison.OrdinalIgnoreCase));
+
+        if (manifestPath == null)
+        {
+            manifestPath = manifestFiles[0];
+            if (manifestFiles.Length > 1)
+            {
+                _logger.LogWarning("No manifest named {ModuleName}.psd1 found; using first of {Count}: {Manifest}",
+                    moduleName, manifestFiles.Length, Path.GetFileName(manifestPath));
+            }
+        }
+
         return new ModuleFile
         {
             RelativePath = Path.GetFileName(manifestPath),
@@ -314,14 +328,16 @@ internal class PackageExtractor
 
     /// <summary>
     /// Scans the root and lib directories for scripts and data files.
+    /// Secondary manifests (e.g. nested sub-module .psd1 files imported by the root .psm1) are kept;
+    /// only the main module manifest is excluded because it is rewritten separately.
     /// </summary>
-    private void ScanDirectoryForScriptsAndData(string extractedPath, List<ModuleFile> files)
+    private void ScanDirectoryForScriptsAndData(string extractedPath, string mainManifestPath, List<ModuleFile> files)
     {
         var excludedDirs = new[] { "bin", "_rels", "package" };
 
         var rootFiles = Directory.EnumerateFiles(extractedPath, "*.*", SearchOption.TopDirectoryOnly)
             .Where(f => !f.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
-            .Where(f => !f.EndsWith(".psd1", StringComparison.OrdinalIgnoreCase));
+            .Where(f => !f.Equals(mainManifestPath, StringComparison.OrdinalIgnoreCase));
 
         foreach (var file in rootFiles)
         {
@@ -330,7 +346,7 @@ internal class PackageExtractor
 
             var fileType = extension switch
             {
-                ".ps1" or ".ps1xml" or ".psm1" => ModuleFileType.Script,
+                ".ps1" or ".ps1xml" or ".psm1" or ".psd1" => ModuleFileType.Script,
                 ".md" or ".txt" or ".license" => ModuleFileType.Data,
                 _ => ModuleFileType.Other,
             };
@@ -343,12 +359,18 @@ internal class PackageExtractor
             });
         }
 
-        // Recursively scan subdirectories (but skip known NuGet metadata dirs)
+        // Recursively scan subdirectories
         foreach (var subdir in Directory.GetDirectories(extractedPath))
         {
             var folderName = Path.GetFileName(subdir);
             if (excludedDirs.Contains(folderName, StringComparer.OrdinalIgnoreCase))
                 continue;
+
+            if (FrameworkFolderPrefixes.Any(prefix => folderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogDebug("Skipping .NET Framework folder for scripts/data: {Folder}", folderName);
+                continue;
+            }
 
             RecursivelyAddFiles(subdir, extractedPath, files);
         }
@@ -365,14 +387,14 @@ internal class PackageExtractor
             {
                 var extension = Path.GetExtension(file).ToLowerInvariant();
 
-                // Skip binaries (already handled in TFM scan), NuGet metadata, and manifest
-                if (extension == ".dll" || extension == ".nuspec" || extension == ".psd1")
+                // Skip binaries (already handled in TFM scan) and NuGet metadata
+                if (extension == ".dll" || extension == ".nuspec")
                     continue;
 
                 var relativePath = Path.GetRelativePath(basePath, file);
                 var fileType = extension switch
                 {
-                    ".ps1" or ".ps1xml" or ".psm1" => ModuleFileType.Script,
+                    ".ps1" or ".ps1xml" or ".psm1" or ".psd1" => ModuleFileType.Script,
                     ".md" or ".txt" or ".license" => ModuleFileType.Data,
                     _ => ModuleFileType.Other,
                 };

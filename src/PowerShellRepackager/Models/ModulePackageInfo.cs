@@ -42,7 +42,8 @@ public class ModulePackageInfo
 
     /// <summary>
     /// The root module file if present (as specified in the manifest's RootModule property).
-    /// May be null if the module has no explicit root module.
+    /// May be null if the module has no explicit root module, or if manifest parsing hasn't been performed yet.
+    /// Note: Currently not populated by the extractor (Step 2). Will be identified by manifest parsing in later steps.
     /// </summary>
     public ModuleFile? RootModuleFile => Files.FirstOrDefault(f => f.FileType == ModuleFileType.RootModule);
 
@@ -55,10 +56,23 @@ public class ModulePackageInfo
         .ToList();
 
     /// <summary>
-    /// The directory path where TFM-specific files are located at the root of the extracted package.
-    /// For example: "{ExtractedPath}/netcoreapp3.1" or "{ExtractedPath}/net8.0".
-    /// Uses the primary folder naming convention from <see cref="SelectedTargetFramework.ToFolderName()"/>,
-    /// but the actual folder on disk may use an alternative name (e.g., netcoreapp3.1 instead of netcore3.1).
+    /// All script files (.ps1, .psm1, .psd1, etc.) found in the module.
     /// </summary>
-    public string BinDirectory => Path.Combine(ExtractedPath, SelectedTargetFramework.ToFolderName());
+    public IReadOnlyList<ModuleFile> Scripts => Files
+        .Where(f => f.FileType == ModuleFileType.Script)
+        .ToList();
+
+    /// <summary>
+    /// All data files (readme, license, examples, etc.) found in the module.
+    /// </summary>
+    public IReadOnlyList<ModuleFile> DataFiles => Files
+        .Where(f => f.FileType == ModuleFileType.Data)
+        .ToList();
+
+    /// <summary>
+    /// All other files that don't fit specific categories.
+    /// </summary>
+    public IReadOnlyList<ModuleFile> OtherFiles => Files
+        .Where(f => f.FileType == ModuleFileType.Other)
+        .ToList();
 }

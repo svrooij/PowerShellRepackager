@@ -108,4 +108,62 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
 
         return s_alc.ResolveFromBin(assemblyName);
     }
+
+    /// <summary>
+    /// Enumerates all types in the private AssemblyLoadContext that might be cmdlets.
+    /// Returns a list of fully qualified type names for types decorated with [Cmdlet] or [Alias] attributes.
+    /// This is used by the generated .psm1 wrapper to discover and import cmdlets from the isolated context.
+    /// </summary>
+    public static List<string> GetLoadedCmdletTypeNames()
+    {
+        var cmdletTypeNames = new List<string>();
+
+        lock (s_lock)
+        {
+            if (s_alc == null)
+            {
+                return cmdletTypeNames; // Return empty list if ALC not initialized
+            }
+
+            try
+            {
+                // Get all assemblies loaded into the private ALC
+                var assemblies = s_alc.Assemblies.ToList();
+
+                foreach (var assembly in assemblies)
+                {
+                    try
+                    {
+                        // Iterate over all types in the assembly
+                        var types = assembly.GetTypes();
+                        foreach (var type in types)
+                        {
+                            // Check if the type has [Cmdlet] or [Alias] attributes
+                            var cmdletAttr = type.GetCustomAttribute(typeof(CmdletAttribute));
+                            var aliasAttr = type.GetCustomAttribute(typeof(AliasAttribute));
+
+                            if (cmdletAttr != null || aliasAttr != null)
+                            {
+                                // Return the fully qualified name so it can be imported via Add-Type
+                                cmdletTypeNames.Add(type.AssemblyQualifiedName ?? $"{type.FullName}, {assembly.GetName().Name}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log but continue - some assemblies may not be introspectable
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Error scanning assembly {assembly.GetName().Name} for cmdlets: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Error enumerating cmdlet types: {ex.Message}");
+            }
+        }
+
+        return cmdletTypeNames;
+    }
 }
