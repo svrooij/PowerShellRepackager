@@ -39,6 +39,25 @@ public sealed class LoaderConfiguration
     public string[]? AssemblySearchPaths { get; set; }
 
     /// <summary>
+    /// Relative paths to NuGet-style <c>runtimes</c> folders (e.g. ["netCore/runtimes"]).
+    /// At import time the loader selects the <c>{rid}/native</c> and <c>{rid}/lib/*</c> subfolders that match
+    /// the current OS and process architecture (e.g. win-x64), so only the correct native binaries are loaded.
+    /// </summary>
+    [JsonPropertyName("runtimesPaths")]
+    public string[]? RuntimesPaths { get; set; }
+
+    /// <summary>
+    /// Simple names (without .dll) of the assemblies that are loaded into the private AssemblyLoadContext.
+    /// These are the module's <em>dependencies</em> (e.g. Microsoft.Identity.Client, Newtonsoft.Json).
+    /// Assemblies found in the search paths that are not listed here are considered module-owned and are
+    /// loaded into the Default ALC instead, so PowerShell can resolve their types in scripts
+    /// (type literals, parameter constraints, format/type files).
+    /// If null or empty, every assembly in the search paths is isolated (legacy behavior).
+    /// </summary>
+    [JsonPropertyName("isolatedAssemblies")]
+    public string[]? IsolatedAssemblies { get; set; }
+
+    /// <summary>
     /// Optional: The original module name before repackaging (e.g., "MicrosoftTeams").
     /// Used for traceability and audit logs.
     /// </summary>

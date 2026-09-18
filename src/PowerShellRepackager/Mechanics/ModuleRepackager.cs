@@ -36,6 +36,20 @@ public class ModuleRepackager
         string repackagedModuleName,
         string? outputPath,
         CancellationToken cancellationToken = default)
+        => await RepackageModuleAsync(extractedInfo, repackagedModuleName, outputPath, null, null, cancellationToken);
+
+    /// <summary>
+    /// Repackages a module, with explicit overrides for assembly isolation.
+    /// </summary>
+    /// <param name="isolateAssemblies">Assembly names or wildcard patterns that must be isolated in the private ALC.</param>
+    /// <param name="sharedAssemblies">Assembly names or wildcard patterns that must be loaded into the Default ALC.</param>
+    public async Task<ModuleRepackageInfo> RepackageModuleAsync(
+        ModulePackageInfo extractedInfo,
+        string repackagedModuleName,
+        string? outputPath,
+        string[]? isolateAssemblies,
+        string[]? sharedAssemblies,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting repackaging: {Module} v{Version} → {NewName}",
             extractedInfo.ModuleName, extractedInfo.Version, repackagedModuleName);
@@ -114,11 +128,16 @@ public class ModuleRepackager
         // Determine assemblies to preload (critical system/framework DLLs)
         var preloadAssemblies = DeterminePreloadAssemblies(extractedInfo.Assemblies);
 
+        // Determine which bundled assemblies are dependencies (isolated in the private ALC) versus
+        // module-owned (loaded into the Default ALC so PowerShell scripts can resolve their types)
+        var isolatedAssemblies = await DetermineIsolatedAssembliesAsync(moduleOutputDir, isolateAssemblies, sharedAssemblies, cancellationToken);
+
         // Generate loader configuration
         var loaderConfigPath = await GenerateLoaderConfigAsync(
             binDir,
             repackagedModuleName,
             preloadAssemblies,
+            isolatedAssemblies,
             cancellationToken);
         _logger.LogInformation("Generated loader config: {Path}", loaderConfigPath);
 
@@ -173,6 +192,7 @@ public class ModuleRepackager
         try
         {
             var manifestContent = await File.ReadAllTextAsync(manifestPath, cancellationToken);
+            manifestContent = ResolvePSEditionConditionals(manifestContent);
 
             // Use PowerShell AST to parse the manifest hash table
             var parseErrors = Array.Empty<ParseError>();
@@ -185,7 +205,8 @@ public class ModuleRepackager
 
             var manifestData = new ManifestData
             {
-                ModuleName = "UnknownModule",
+                // A manifest has no ModuleName key: the module name is the file name
+                ModuleName = Path.GetFileNameWithoutExtension(manifestPath),
                 ModuleVersion = "1.0.0",
                 ManifestPath = manifestPath,
                 IsBinaryModule = false
@@ -214,13 +235,8 @@ public class ModuleRepackager
     /// </summary>
     private void ExtractManifestValues(string manifestContent, ManifestData data)
     {
-        // Extract ModuleName
-        var moduleNameMatch = System.Text.RegularExpressions.Regex.Match(
-            manifestContent, "ModuleName\\s*=\\s*['\"]?([^'\"\\n]+)['\"]?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (moduleNameMatch.Success)
-        {
-            data.ModuleName = moduleNameMatch.Groups[1].Value.Trim();
-        }
+        // Note: ModuleName is intentionally not read from the content. Manifests don't have that key at the
+        // root; any 'ModuleName =' found belongs to a RequiredModules/NestedModules entry.
 
         // Extract ModuleVersion
         var versionMatch = System.Text.RegularExpressions.Regex.Match(
@@ -737,17 +753,115 @@ public class ModuleRepackager
     }
 
     /// <summary>
+    /// Well-known dependency libraries that frequently conflict between modules and must always be isolated,
+    /// even when a module script happens to mention them (e.g. a net472-only LoadFrom call).
+    /// </summary>
+    private static readonly string[] AlwaysIsolatedPrefixes =
+    {
+        "Newtonsoft.Json",
+        "System.Text.Json",
+        "Microsoft.Identity.Client",
+        "Microsoft.IdentityModel.",
+        "System.IdentityModel.",
+        "Microsoft.Extensions.",
+        "Microsoft.Bcl.",
+        "Azure.",
+        "Microsoft.Rest.",
+        "Microsoft.Graph.",
+        "Polly",
+    };
+
+    /// <summary>
+    /// Classifies every bundled assembly as either module-owned or an isolated dependency.
+    /// An assembly is module-owned when a bundled script or manifest (.ps1/.psm1/.psd1/.ps1xml) refers to it by
+    /// name (Import-Module, RequiredAssemblies, NestedModules, Add-Type, LoadFrom, type literals, ...);
+    /// such assemblies must load into the Default ALC so PowerShell can resolve their types.
+    /// Everything else is a dependency and is isolated in the private ALC.
+    /// Explicit overrides (<paramref name="isolatePatterns"/> / <paramref name="sharedPatterns"/>, supporting
+    /// PowerShell wildcards) take precedence over the heuristic; isolate wins when both match.
+    /// </summary>
+    private async Task<string[]> DetermineIsolatedAssembliesAsync(
+        string moduleOutputDir,
+        string[]? isolatePatterns,
+        string[]? sharedPatterns,
+        CancellationToken cancellationToken)
+    {
+        var isolateOverrides = CreateWildcardPatterns(isolatePatterns);
+        var sharedOverrides = CreateWildcardPatterns(sharedPatterns);
+
+        var scriptExtensions = new[] { ".ps1", ".psm1", ".psd1", ".ps1xml" };
+        var scriptText = new StringBuilder();
+        foreach (var file in Directory.EnumerateFiles(moduleOutputDir, "*", SearchOption.AllDirectories))
+        {
+            if (!scriptExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                continue;
+
+            scriptText.Append(await File.ReadAllTextAsync(file, cancellationToken)).Append('\n');
+        }
+        var allScriptText = scriptText.ToString();
+
+        var isolated = new List<string>();
+        var owned = new List<string>();
+        var assemblyNames = Directory.EnumerateFiles(moduleOutputDir, "*.dll", SearchOption.AllDirectories)
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in assemblyNames)
+        {
+            if (name!.Equals("Svrooij.PowerShellRepackager.GenericLoader", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (isolateOverrides.Any(p => p.IsMatch(name)))
+            {
+                isolated.Add(name);
+                continue;
+            }
+
+            if (sharedOverrides.Any(p => p.IsMatch(name)))
+            {
+                owned.Add(name);
+                continue;
+            }
+
+            var alwaysIsolate = AlwaysIsolatedPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+            var referencedByScript = allScriptText.Contains(name, StringComparison.OrdinalIgnoreCase);
+
+            if (!alwaysIsolate && referencedByScript)
+                owned.Add(name);
+            else
+                isolated.Add(name);
+        }
+
+        _logger.LogInformation("Module-owned assemblies (Default ALC): {Owned}", string.Join(", ", owned));
+        _logger.LogInformation("Isolated dependency assemblies (private ALC): {Count}", isolated.Count);
+
+        return isolated.ToArray();
+    }
+
+    private static WildcardPattern[] CreateWildcardPatterns(string[]? patterns)
+        => (patterns ?? Array.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => new WildcardPattern(
+                p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? p[..^4] : p,
+                WildcardOptions.IgnoreCase | WildcardOptions.CultureInvariant))
+            .ToArray();
+
+    /// <summary>
     /// Generates the loader configuration file (loader-config.json).
     /// </summary>
     private async Task<string> GenerateLoaderConfigAsync(
         string binDir,
         string moduleName,
         string[] preloadAssemblies,
+        string[] isolatedAssemblies,
         CancellationToken cancellationToken)
     {
         // Scan the module directory to find all folders containing assemblies
         var moduleDir = Path.GetDirectoryName(binDir) ?? binDir;
         var assemblySearchPaths = new List<string> { "bin" }; // Always include bin as fallback
+        var runtimesPaths = new List<string>();
 
         try
         {
@@ -755,14 +869,35 @@ public class ModuleRepackager
             var allDirs = Directory.GetDirectories(moduleDir, "*", SearchOption.AllDirectories);
             foreach (var dir in allDirs)
             {
+                var relativePath = Path.GetRelativePath(moduleDir, dir);
+                var segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                // NuGet-style RID folders (runtimes/{rid}/native, runtimes/{rid}/lib/{tfm}) are resolved at
+                // import time by the loader for the current OS/architecture; only record the runtimes root.
+                var runtimesIndex = Array.FindIndex(segments, s => s.Equals("runtimes", StringComparison.OrdinalIgnoreCase));
+                if (runtimesIndex >= 0)
+                {
+                    var runtimesRoot = string.Join('/', segments.Take(runtimesIndex + 1));
+                    if (!runtimesPaths.Contains(runtimesRoot, StringComparer.OrdinalIgnoreCase))
+                    {
+                        runtimesPaths.Add(runtimesRoot);
+                    }
+                    continue;
+                }
+
+                // ref/ folders contain reference assemblies (metadata only) that must never be loaded
+                if (segments.Any(s => s.Equals("ref", StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
                 var dllFiles = Directory.GetFiles(dir, "*.dll");
                 if (dllFiles.Length > 0)
                 {
-                    // Get the relative path from the module root
-                    var relativePath = Path.GetRelativePath(moduleDir, dir);
-                    if (!assemblySearchPaths.Contains(relativePath))
+                    var searchPath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
+                    if (!assemblySearchPaths.Contains(searchPath, StringComparer.OrdinalIgnoreCase))
                     {
-                        assemblySearchPaths.Add(relativePath);
+                        assemblySearchPaths.Add(searchPath);
                     }
                 }
             }
@@ -773,12 +908,18 @@ public class ModuleRepackager
         }
 
         _logger.LogInformation("Assembly search paths: {Paths}", string.Join(", ", assemblySearchPaths));
+        if (runtimesPaths.Count > 0)
+        {
+            _logger.LogInformation("RID-specific runtimes folders (resolved at import time): {Paths}", string.Join(", ", runtimesPaths));
+        }
 
         var loaderConfig = new
         {
             moduleName = moduleName,
             preloadAssemblies = preloadAssemblies,
-            assemblySearchPaths = assemblySearchPaths.ToArray()
+            assemblySearchPaths = assemblySearchPaths.ToArray(),
+            runtimesPaths = runtimesPaths.ToArray(),
+            isolatedAssemblies = isolatedAssemblies
         };
 
         var configPath = Path.Combine(binDir, "loader-config.json");
@@ -933,8 +1074,14 @@ catch {
             ? GetDefaultManifestTemplate(newModuleName, newGuid)
             : await File.ReadAllTextAsync(originalManifestPath, cancellationToken);
 
-        // Remove ModuleName from the manifest (not needed with generic loader)
-        manifestContent = RemoveManifestField(manifestContent, "ModuleName");
+        // The repackaged module is Core-only: collapse any `if ($PSEdition -eq 'Core') {...} else {...}` values
+        manifestContent = ResolvePSEditionConditionals(manifestContent);
+
+        // FileList refers to the original layout (and the repackaged module adds loader files); drop it
+        manifestContent = RemoveManifestValue(manifestContent, "FileList");
+
+        // Note: never strip 'ModuleName' lines here; a manifest has no root ModuleName key, the only
+        // occurrences are inside RequiredModules/NestedModules specs where they are mandatory.
 
         // Update key fields for the repackaged module
         manifestContent = UpdateManifestField(manifestContent, "GUID", newGuid.ToString());
@@ -1154,6 +1301,122 @@ catch {
 
         // Remove everything after the closing brace (which contains the signature)
         return manifestContent.Substring(0, lastBraceIndex + 1);
+    }
+
+    /// <summary>
+    /// Collapses <c>if ($PSEdition -eq 'Core') { A } else { B }</c> (and the <c>-ne 'Desktop'</c> / swapped variants)
+    /// values inside the manifest to just the Core branch. Some modules (e.g. ExchangeOnlineManagement) use this for
+    /// RootModule/FileList; since the repackaged module is Core-only the conditional is redundant and the simple
+    /// value is required for restricted-language manifest parsing.
+    /// </summary>
+    private string ResolvePSEditionConditionals(string manifestContent)
+    {
+        var ast = Parser.ParseInput(manifestContent, out _, out _);
+        var ifStatements = ast.FindAll(a => a is IfStatementAst, searchNestedScriptBlocks: true)
+            .Cast<IfStatementAst>()
+            .Where(i => i.Clauses.Count == 1)
+            .OrderByDescending(i => i.Extent.StartOffset)
+            .ToList();
+
+        if (ifStatements.Count == 0)
+            return manifestContent;
+
+        var sb = new StringBuilder(manifestContent);
+        foreach (var ifStatement in ifStatements)
+        {
+            var (condition, ifBody) = ifStatement.Clauses[0];
+            var coreIsIfBranch = IsPSEditionCoreCondition(condition);
+            if (coreIsIfBranch == null)
+            {
+                _logger.LogWarning("Manifest contains an unrecognized conditional value, leaving as-is: {Condition}", condition.Extent.Text);
+                continue;
+            }
+
+            StatementBlockAst? selected = coreIsIfBranch.Value ? ifBody : ifStatement.ElseClause;
+            if (selected == null)
+            {
+                _logger.LogWarning("Manifest conditional has no Core branch, leaving as-is: {Condition}", condition.Extent.Text);
+                continue;
+            }
+
+            // Take the inner statements without the surrounding braces
+            var inner = selected.Extent.Text.Trim();
+            if (inner.StartsWith('{') && inner.EndsWith('}'))
+                inner = inner[1..^1].Trim();
+
+            sb.Remove(ifStatement.Extent.StartOffset, ifStatement.Extent.EndOffset - ifStatement.Extent.StartOffset);
+            sb.Insert(ifStatement.Extent.StartOffset, inner);
+            _logger.LogInformation("Resolved $PSEdition conditional in manifest to Core value: {Value}",
+                inner.Length > 80 ? inner[..80] + "..." : inner);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Returns true if the condition selects Core in its "if" branch, false if it selects Desktop
+    /// (so Core is the else branch), or null if the condition is not a recognizable $PSEdition test.
+    /// </summary>
+    private static bool? IsPSEditionCoreCondition(PipelineBaseAst condition)
+    {
+        var binary = condition.Find(a => a is BinaryExpressionAst, searchNestedScriptBlocks: false) as BinaryExpressionAst;
+        if (binary == null)
+            return null;
+
+        static bool IsPSEditionVar(ExpressionAst e) =>
+            e is VariableExpressionAst v && v.VariablePath.UserPath.Equals("PSEdition", StringComparison.OrdinalIgnoreCase);
+
+        static string? EditionLiteral(ExpressionAst e) =>
+            e is StringConstantExpressionAst s ? s.Value : null;
+
+        string? edition = null;
+        if (IsPSEditionVar(binary.Left)) edition = EditionLiteral(binary.Right);
+        else if (IsPSEditionVar(binary.Right)) edition = EditionLiteral(binary.Left);
+        if (edition == null)
+            return null;
+
+        var isEquals = binary.Operator is TokenKind.Ieq or TokenKind.Ceq;
+        var isNotEquals = binary.Operator is TokenKind.Ine or TokenKind.Cne;
+        if (!isEquals && !isNotEquals)
+            return null;
+
+        var literalIsCore = edition.Equals("Core", StringComparison.OrdinalIgnoreCase);
+        var literalIsDesktop = edition.Equals("Desktop", StringComparison.OrdinalIgnoreCase);
+        if (!literalIsCore && !literalIsDesktop)
+            return null;
+
+        // if ($PSEdition -eq 'Core') / if ($PSEdition -ne 'Desktop') → if-branch is Core
+        return literalIsCore == isEquals;
+    }
+
+    /// <summary>
+    /// Removes a root-level manifest entry regardless of the shape of its value (single line, multi-line array,
+    /// hashtable or conditional), using the AST to find the exact extent.
+    /// </summary>
+    private string RemoveManifestValue(string manifestContent, string fieldName)
+    {
+        var ast = Parser.ParseInput(manifestContent, out _, out _);
+        var root = ast.Find(a => a is HashtableAst, searchNestedScriptBlocks: false) as HashtableAst;
+        if (root == null)
+            return manifestContent;
+
+        var entry = root.KeyValuePairs.FirstOrDefault(kv =>
+            kv.Item1 is StringConstantExpressionAst key &&
+            key.Value.Equals(fieldName, StringComparison.OrdinalIgnoreCase));
+        if (entry == null)
+            return manifestContent;
+
+        var start = entry.Item1.Extent.StartOffset;
+        var end = entry.Item2.Extent.EndOffset;
+
+        // Also remove the leading indentation and trailing newline so no blank line is left behind
+        while (start > 0 && (manifestContent[start - 1] == ' ' || manifestContent[start - 1] == '\t'))
+            start--;
+        if (end < manifestContent.Length && manifestContent[end] == '\r') end++;
+        if (end < manifestContent.Length && manifestContent[end] == '\n') end++;
+
+        _logger.LogDebug("Removed manifest entry {Field}", fieldName);
+        return manifestContent.Remove(start, end - start);
     }
 
     /// <summary>

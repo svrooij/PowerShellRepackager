@@ -121,7 +121,7 @@ internal class PackageExtractor
         {
             throw new InvalidOperationException(
                 $"No compatible .NET target frameworks found. Module must contain one of: " +
-                $"netcore3.1 (or netcoreapp3.1), net5.0, net6.0, net7.0, net8.0, net9.0");
+                $"netcore3.1 (or netcoreapp3.1), net5.0, net6.0, net7.0, net8.0, net9.0, netCore");
         }
 
         // Select the highest priority TFM
@@ -277,30 +277,14 @@ internal class PackageExtractor
             }
         }
 
-        // Then, scan the selected TFM folder for TFM-specific DLLs
-        var selectedTfmFolder = Path.Combine(extractedPath, selectedTfm.ToFolderName());
+        // Then, scan the selected TFM folder for TFM-specific DLLs.
+        // Resolve the folder by parsing directory names so alternative spellings/casing
+        // (netcoreapp3.1 vs netcore3.1, netCore vs netcore) work on case-sensitive file systems too.
+        var selectedTfmFolder = Directory.GetDirectories(extractedPath)
+            .FirstOrDefault(d => TargetFrameworkExtensions.TryParseFolderName(Path.GetFileName(d), out var tf) && tf == selectedTfm)
+            ?? Path.Combine(extractedPath, selectedTfm.ToFolderName());
 
         _logger.LogDebug("Looking for TFM-specific folder: {Path}", selectedTfmFolder);
-
-        // For .NET Core 3.1, check both naming conventions
-        if (selectedTfm == TargetFramework.NetCore31)
-        {
-            if (!Directory.Exists(selectedTfmFolder))
-            {
-                var altPath = Path.Combine(extractedPath, "netcoreapp3.1");
-                _logger.LogDebug("Primary path not found ({Primary}), checking alternative: {Alternative}", selectedTfmFolder, altPath);
-
-                if (Directory.Exists(altPath))
-                {
-                    selectedTfmFolder = altPath;
-                    _logger.LogInformation("Using alternative .NET Core 3.1 folder name: netcoreapp3.1");
-                }
-                else
-                {
-                    _logger.LogWarning("Neither {Primary} nor {Alternative} exists", selectedTfmFolder, altPath);
-                }
-            }
-        }
 
         if (!Directory.Exists(selectedTfmFolder))
         {

@@ -22,6 +22,9 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     private readonly LoaderConfiguration _config;
     private readonly string _moduleDirectory;
     private readonly string[] _searchPaths;
+    private readonly string[] _nativeSearchPaths;
+    private readonly HashSet<string>? _isolatedAssemblies;
+    private readonly Dictionary<string, IntPtr> _loadedNativeLibraries = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the generic ALC with the given configuration.
@@ -42,28 +45,72 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
         if (string.IsNullOrEmpty(loaderAssemblyLocation))
             throw new ArgumentException("Loader assembly location cannot be null or empty.", nameof(loaderAssemblyLocation));
 
-        // Compute path to the module directory (where the loader DLL is placed)
+        // The loader DLL is placed in {module}/bin; search paths in the config are relative to the module root.
         string? loaderDir = Path.GetDirectoryName(loaderAssemblyLocation);
         if (loaderDir == null)
             throw new ArgumentException($"Cannot determine directory for loader assembly at '{loaderAssemblyLocation}'.", nameof(loaderAssemblyLocation));
 
-        _moduleDirectory = loaderDir;
+        _moduleDirectory = Path.GetFileName(loaderDir).Equals("bin", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetDirectoryName(loaderDir) ?? loaderDir
+            : loaderDir;
 
         // Determine assembly search paths from config or use default
         // Config may specify multiple paths like ["bin", "net48", "netcore3.1"]
+        var searchPaths = new List<string>();
         if (_config.AssemblySearchPaths != null && _config.AssemblySearchPaths.Length > 0)
         {
-            _searchPaths = _config.AssemblySearchPaths
-                .Select(path => Path.Combine(_moduleDirectory, path))
-                .ToArray();
+            searchPaths.AddRange(_config.AssemblySearchPaths.Select(path => Path.Combine(_moduleDirectory, path)));
             System.Diagnostics.Debug.WriteLine(
                 $"Configured assembly search paths: {string.Join(", ", _config.AssemblySearchPaths)}");
         }
         else
         {
             // Default to bin/ for backward compatibility
-            _searchPaths = new[] { Path.Combine(_moduleDirectory, "bin") };
+            searchPaths.Add(Path.Combine(_moduleDirectory, "bin"));
             System.Diagnostics.Debug.WriteLine("No assembly search paths configured, using default: bin/");
+        }
+
+        // Resolve NuGet-style runtimes/{rid}/... folders for the current OS + architecture only
+        var nativeSearchPaths = new List<string>();
+        if (_config.RuntimesPaths != null)
+        {
+            foreach (var runtimesRelative in _config.RuntimesPaths)
+            {
+                var runtimesDir = Path.Combine(_moduleDirectory, runtimesRelative);
+                if (!Directory.Exists(runtimesDir))
+                    continue;
+
+                foreach (var rid in RuntimeIdentifiers.GetCompatibleRids())
+                {
+                    var ridDir = Path.Combine(runtimesDir, rid);
+                    if (!Directory.Exists(ridDir))
+                        continue;
+
+                    var nativeDir = Path.Combine(ridDir, "native");
+                    if (Directory.Exists(nativeDir))
+                        nativeSearchPaths.Add(nativeDir);
+
+                    // runtimes/{rid}/lib/{tfm}/*.dll: RID-specific managed assemblies
+                    var libDir = Path.Combine(ridDir, "lib");
+                    if (Directory.Exists(libDir))
+                        searchPaths.AddRange(Directory.GetDirectories(libDir).Where(d => Directory.GetFiles(d, "*.dll").Length > 0));
+                }
+            }
+
+            System.Diagnostics.Debug.WriteLine(
+                $"RID '{RuntimeIdentifiers.Current}' native search paths: {string.Join(", ", nativeSearchPaths)}");
+        }
+
+        _searchPaths = searchPaths.ToArray();
+        _nativeSearchPaths = nativeSearchPaths.ToArray();
+
+        if (_config.IsolatedAssemblies != null && _config.IsolatedAssemblies.Length > 0)
+        {
+            _isolatedAssemblies = new HashSet<string>(
+                _config.IsolatedAssemblies.Select(n => Path.GetFileNameWithoutExtension(n)),
+                StringComparer.OrdinalIgnoreCase);
+            System.Diagnostics.Debug.WriteLine(
+                $"Isolating {_isolatedAssemblies.Count} dependency assemblies; module-owned assemblies load into the Default ALC");
         }
 
         // Warn if none of the search directories exist
@@ -85,11 +132,18 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     {
         foreach (string name in assemblyNames)
         {
+            var simpleName = Path.GetFileNameWithoutExtension(name);
+            if (!IsIsolated(simpleName))
+            {
+                System.Diagnostics.Debug.WriteLine($"Skipping preload of module-owned assembly '{simpleName}' (loaded into Default ALC on demand).");
+                continue;
+            }
+
             // Search for the assembly in all configured paths
             bool found = false;
             foreach (var searchPath in _searchPaths)
             {
-                string path = Path.Combine(searchPath, $"{name}.dll");
+                string path = Path.Combine(searchPath, $"{simpleName}.dll");
                 if (File.Exists(path))
                 {
                     try
@@ -114,9 +168,33 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// Resolves an assembly from the configured search paths, returning null if not found.
-    /// Unlike <see cref="LoadFromAssemblyName"/>, this never falls back to the Default ALC,
-    /// which would re-trigger the Default.Resolving event and cause infinite recursion.
+    /// Returns true when the assembly is a dependency that must live in this private ALC.
+    /// When no isolation list is configured, every bundled assembly is isolated.
+    /// </summary>
+    internal bool IsIsolated(string assemblyName)
+        => _isolatedAssemblies == null || _isolatedAssemblies.Contains(assemblyName);
+
+    /// <summary>
+    /// Finds the file for an assembly in the configured search paths, or null if not bundled.
+    /// </summary>
+    private string? FindAssemblyFile(string assemblyName)
+    {
+        foreach (var searchPath in _searchPaths)
+        {
+            string assemblyPath = Path.Combine(searchPath, $"{assemblyName}.dll");
+            if (File.Exists(assemblyPath))
+                return assemblyPath;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a bundled assembly for the Default ALC's Resolving event.
+    /// Isolated dependencies are loaded into this private ALC; module-owned assemblies are loaded into
+    /// the Default ALC so their types are visible to PowerShell scripts.
+    /// Unlike <see cref="LoadFromAssemblyName"/>, this never falls back to the Default ALC's own
+    /// resolution, which would re-trigger the Default.Resolving event and cause infinite recursion.
     /// </summary>
     /// <param name="assemblyName">The assembly name to resolve.</param>
     /// <returns>The loaded assembly, or null if not found in any search path.</returns>
@@ -125,6 +203,31 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
         if (assemblyName?.Name == null)
             return null;
 
+        if (IsIsolated(assemblyName.Name))
+            return ResolveIsolated(assemblyName);
+
+        var existing = Default.Assemblies.FirstOrDefault(a => a.GetName().Name?.Equals(assemblyName.Name, StringComparison.OrdinalIgnoreCase) == true);
+        if (existing != null)
+            return existing;
+
+        var path = FindAssemblyFile(assemblyName.Name);
+        if (path == null)
+            return null;
+
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"Loading module-owned assembly '{assemblyName.Name}' into Default ALC from '{path}'");
+            return Default.LoadFromAssemblyPath(path);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load assembly '{assemblyName.Name}' from '{path}' into Default ALC: {ex.Message}");
+            return null;
+        }
+    }
+
+    private Assembly? ResolveIsolated(AssemblyName assemblyName)
+    {
         // Search for the assembly in all configured paths
         foreach (var searchPath in _searchPaths)
         {
@@ -168,9 +271,14 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
         if (assemblyName?.Name == null)
             return null;
 
-        // First, try to load from the module's search paths.
-        // This ensures bundled assemblies are resolved from the private ALC.
-        Assembly? assembly = ResolveFromBin(assemblyName);
+        // Module-owned assemblies (not in the isolation list) must come from the Default ALC so there is
+        // a single type identity shared with PowerShell. Returning null defers to Default, whose
+        // Resolving handler will load the file from the module folder if needed.
+        if (!IsIsolated(assemblyName.Name))
+            return null;
+
+        // Isolated dependencies are resolved from the module's search paths into this private ALC.
+        Assembly? assembly = ResolveIsolated(assemblyName);
         if (assembly != null)
             return assembly;
 
@@ -178,5 +286,46 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
         // This is crucial: framework assemblies (System.*) and PowerShell SDK assemblies
         // (System.Management.Automation) MUST come from Default ALC to maintain type identity.
         return null;
+    }
+
+    /// <summary>
+    /// Resolves native libraries (P/Invoke targets such as msalruntime.dll) from the RID-specific
+    /// <c>runtimes/{rid}/native</c> folder for the current platform, then from the managed search paths.
+    /// Returns <see cref="IntPtr.Zero"/> to fall back to the default OS probing when not found.
+    /// </summary>
+    protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
+    {
+        if (string.IsNullOrEmpty(unmanagedDllName))
+            return IntPtr.Zero;
+
+        lock (_loadedNativeLibraries)
+        {
+            if (_loadedNativeLibraries.TryGetValue(unmanagedDllName, out var cached))
+                return cached;
+
+            foreach (var candidate in RuntimeIdentifiers.GetNativeFileNameCandidates(unmanagedDllName))
+            {
+                foreach (var dir in _nativeSearchPaths.Concat(_searchPaths))
+                {
+                    var path = Path.Combine(dir, candidate);
+                    if (!File.Exists(path))
+                        continue;
+
+                    try
+                    {
+                        var handle = LoadUnmanagedDllFromPath(path);
+                        _loadedNativeLibraries[unmanagedDllName] = handle;
+                        System.Diagnostics.Debug.WriteLine($"Loaded native library '{unmanagedDllName}' from '{path}'");
+                        return handle;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to load native library '{unmanagedDllName}' from '{path}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        return IntPtr.Zero;
     }
 }

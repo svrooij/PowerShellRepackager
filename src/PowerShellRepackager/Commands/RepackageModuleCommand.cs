@@ -50,6 +50,16 @@ namespace PowerShellRepackager.Commands;
 /// Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.MicrosoftTeams" -Publish -FeedUrl "https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v2" -ApiKey $pat
 /// </code>
 /// </example>
+/// <example>
+/// <para type="name">Override assembly isolation</para>
+/// <para type="description">
+/// Force all Microsoft.Graph.* assemblies into the private load context and keep a contract assembly shared
+/// with PowerShell so scripts can reference its types.
+/// </para>
+/// <code>
+/// Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.Contoso" -IsolateAssembly 'Microsoft.Graph.*' -SharedAssembly 'Contoso.Contracts'
+/// </code>
+/// </example>
 [GenerateBindings]
 [Cmdlet(VerbsData.Publish, "RepackagedModule")]
 [OutputType(typeof(ModuleRepackageInfo))]
@@ -105,6 +115,23 @@ public partial class RepackageModuleCommand : DependencyCmdlet<Startup>
     [Parameter(Mandatory = false)]
     public string? ApiKey { get; set; }
 
+    /// <summary>
+    /// Assembly names (without .dll) that must always be isolated in the module's private AssemblyLoadContext,
+    /// overriding the automatic classification. Supports wildcards, e.g. 'Microsoft.Graph.*', 'Azure.Core'.
+    /// </summary>
+    [Parameter(Mandatory = false)]
+    [SupportsWildcards]
+    public string[]? IsolateAssembly { get; set; }
+
+    /// <summary>
+    /// Assembly names (without .dll) that must be loaded into the Default AssemblyLoadContext (shared with
+    /// PowerShell), overriding the automatic classification. Use this when scripts reference types from an
+    /// assembly that was isolated by mistake. Supports wildcards, e.g. 'Contoso.Contracts*'.
+    /// </summary>
+    [Parameter(Mandatory = false)]
+    [SupportsWildcards]
+    public string[]? SharedAssembly { get; set; }
+
     [ServiceDependency(Required = true)]
     private Mechanics.ModuleRepackager _moduleRepackager;
 
@@ -137,6 +164,8 @@ public partial class RepackageModuleCommand : DependencyCmdlet<Startup>
                 ModuleInfo,
                 NewModuleName,
                 OutputPath,
+                IsolateAssembly,
+                SharedAssembly,
                 cancellationToken);
 
             _logger.LogInformation("Repackaging successful: {Summary}", repackageInfo.GetSummary());
