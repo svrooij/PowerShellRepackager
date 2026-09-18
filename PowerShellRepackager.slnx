@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Solution Items/">
+    <File Path=".github/workflows/tests.yml" />
     <File Path="LICENSE.txt" />
     <File Path="PLAN.md" />
   </Folder>
