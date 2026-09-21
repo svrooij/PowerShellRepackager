@@ -21,6 +21,8 @@ public class Startup : PsStartup
         // Mechanics for doing the actual work of downloading and repackaging modules
         services.AddTransient<Mechanics.PackageDownloader>();
         services.AddTransient<Mechanics.PackageExtractor>();
+        services.AddTransient<Mechanics.ModuleRepackager>();
+        services.AddTransient<Mechanics.ModulePublisher>();
     }
 
     /// <inheritdoc/>

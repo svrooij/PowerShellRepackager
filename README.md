@@ -13,6 +13,32 @@ If they are loaded the other way around, module B is loaded as expected, but mod
 
 And if you want to use various Microsoft modules in the same session, this is where your issues start. Meet PowerShell Repackager.
 
+## Usage
+
+```powershell
+Import-Module .\PowerShellRepackager
+$package = Get-ModulePackage {Name} {Version}
+$extracted = Expand-ModulePackage -PackagePath $package
+
+# Repackage to a folder only
+Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.{originalName}" -OutputPath {outputPath}
+
+# Repackage and create a .nupkg next to the module folder
+Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.{originalName}" -OutputPath {outputPath} -Pack
+
+# Repackage and publish to the PowerShell Gallery (API key from -ApiKey, or $env:PSGALLERY_API_KEY / $env:NUGET_API_KEY)
+Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.{originalName}" -OutputPath {outputPath} -Publish
+
+# ... or to a private NuGet v2 feed
+Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.{originalName}" -Publish -FeedUrl "https://my.feed/nuget/v2" -ApiKey $key
+```
+
+Publishing is done in .NET (a `PUT` to the feed's `/package/` endpoint with the `X-NuGet-ApiKey` header) and does not depend on PowerShellGet or PSResourceGet.
+
+## Attribution of repackaged modules
+
+Repackaged modules are published under the `Svrooij.*` prefix and are **not** produced or supported by the original authors. The rewritten manifest sets `Author`/`CompanyName` to the repackager, keeps the original `LicenseUri`, points `ProjectUri` to a per-module page in this repository, removes `HelpInfoURI`/`IconUri`, and adds a `README.md` (plus `LICENSE.original.txt` when bundled) to the module folder. See [docs/REPACKAGED-MODULES.md](docs/REPACKAGED-MODULES.md) for the list of repackaged modules and what exactly is changed.
+
 ## Notice
 
 I do not like there is the need of such a repackager, nor did I fancy building something to fix it. Having deep knowledge about the issue and having build [CaPolice](https://github.com/svrooij/CaPolice) with a special Assembly Load Context gives me the ability to ask good questions to GitHub Copilot.

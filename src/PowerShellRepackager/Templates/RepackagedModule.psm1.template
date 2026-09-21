@@ -1,0 +1,59 @@
+# Repackaged module wrapper - dynamically loads cmdlets from bundled DLLs
+# This script module replaces the original .psm1 for compatibility with the isolated AssemblyLoadContext
+
+$ModuleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$BinPath = Join-Path $ModuleRoot 'bin'
+
+# Import the generic loader first - this initializes the AssemblyLoadContext
+$GenericLoaderPath = Join-Path $BinPath 'Svrooij.PowerShellRepackager.GenericLoader.dll'
+if (Test-Path $GenericLoaderPath) {
+	try {
+		Add-Type -Path $GenericLoaderPath -ErrorAction Stop
+		Write-Debug "Generic loader imported: $GenericLoaderPath"
+	}
+	catch {
+		Write-Warning "Failed to import generic loader: $_"
+	}
+}
+
+# Now attempt to discover and load all cmdlet-bearing assemblies
+# We'll import all DLLs in the bin directory except the loader itself
+$LoaderAssemblies = @()
+$CmdletBearingAssemblies = @()
+
+# Get all .dll files in the bin directory
+$AllDlls = Get-ChildItem -Path $BinPath -Filter '*.dll' -ErrorAction SilentlyContinue
+
+foreach ($Dll in $AllDlls) {
+	$DllName = $Dll.Name
+
+	# Skip the generic loader itself
+	if ($DllName -like '*GenericLoader*') {
+		continue
+	}
+
+	try {
+		# Attempt to load the assembly and check for cmdlet types
+		[System.Reflection.Assembly]::LoadFrom($Dll.FullName) | Out-Null
+		$CmdletBearingAssemblies += $Dll.FullName
+		Write-Debug "Marked for cmdlet import: $DllName"
+	}
+	catch {
+		Write-Debug "Could not load $DllName: $_"
+	}
+}
+
+# Import all cmdlet-bearing assemblies into PowerShell
+foreach ($AssemblyPath in $CmdletBearingAssemblies) {
+	try {
+		Add-Type -Path $AssemblyPath -ErrorAction Stop
+		Write-Debug "Imported cmdlet assembly: $(Split-Path -Leaf $AssemblyPath)"
+	}
+	catch {
+		Write-Debug "Failed to import cmdlet assembly $(Split-Path -Leaf $AssemblyPath): $_"
+	}
+}
+
+# Export all cmdlets that were imported
+# This is done automatically by PowerShell when cmdlet types are loaded via Add-Type
+Write-Debug "Module $(Split-Path -Leaf $ModuleRoot) initialized with cmdlets from $BinPath"

@@ -19,6 +19,7 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
 {
     private static GenericAssemblyLoadContext? s_alc;
     private static object s_lock = new();
+    private const string StartupMessageFormat = "This module is repackaged using PowerShellRepackager by @svrooij.\r\n  For more information, visit: https://github.com/svrooij/PowerShellRepackager\r\n  Loader assembly: {0}, Version: {1}\r\n  Location: {2}";
 
     /// <summary>
     /// Called by PowerShell when a module using this loader is imported.
@@ -35,7 +36,11 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
             try
             {
                 // Get the location of this loader assembly.
-                string loaderAssemblyPath = typeof(GenericModuleInitializer).Assembly.Location;
+                var assembly = typeof(GenericModuleInitializer).Assembly;
+                var version = assembly.GetName().Version;
+                string loaderAssemblyPath = assembly.Location;
+                var startupMessage = string.Format(StartupMessageFormat, assembly.GetName().Name, version, loaderAssemblyPath);
+                Console.WriteLine(startupMessage);
 
                 // Load the configuration for this specific repackaged module.
                 LoaderConfiguration config = ConfigurationLoader.LoadConfiguration(loaderAssemblyPath);
@@ -61,7 +66,7 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
                 // Attempt to write to PowerShell's error stream if available.
                 try
                 {
-                    System.Diagnostics.Debug.WriteLine(message);
+                    Console.Error.WriteLine(message);
                 }
                 catch
                 {
@@ -107,5 +112,63 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
             return null;
 
         return s_alc.ResolveFromBin(assemblyName);
+    }
+
+    /// <summary>
+    /// Enumerates all types in the private AssemblyLoadContext that might be cmdlets.
+    /// Returns a list of fully qualified type names for types decorated with [Cmdlet] or [Alias] attributes.
+    /// This is used by the generated .psm1 wrapper to discover and import cmdlets from the isolated context.
+    /// </summary>
+    public static List<string> GetLoadedCmdletTypeNames()
+    {
+        var cmdletTypeNames = new List<string>();
+
+        lock (s_lock)
+        {
+            if (s_alc == null)
+            {
+                return cmdletTypeNames; // Return empty list if ALC not initialized
+            }
+
+            try
+            {
+                // Get all assemblies loaded into the private ALC
+                var assemblies = s_alc.Assemblies.ToList();
+
+                foreach (var assembly in assemblies)
+                {
+                    try
+                    {
+                        // Iterate over all types in the assembly
+                        var types = assembly.GetTypes();
+                        foreach (var type in types)
+                        {
+                            // Check if the type has [Cmdlet] or [Alias] attributes
+                            var cmdletAttr = type.GetCustomAttribute(typeof(CmdletAttribute));
+                            var aliasAttr = type.GetCustomAttribute(typeof(AliasAttribute));
+
+                            if (cmdletAttr != null || aliasAttr != null)
+                            {
+                                // Return the fully qualified name so it can be imported via Add-Type
+                                cmdletTypeNames.Add(type.AssemblyQualifiedName ?? $"{type.FullName}, {assembly.GetName().Name}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log but continue - some assemblies may not be introspectable
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Error scanning assembly {assembly.GetName().Name} for cmdlets: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Error enumerating cmdlet types: {ex.Message}");
+            }
+        }
+
+        return cmdletTypeNames;
     }
 }

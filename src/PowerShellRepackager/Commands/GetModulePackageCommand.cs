@@ -52,7 +52,8 @@ public partial class GetModulePackageCommand : DependencyCmdlet<Startup>
             var filePath = await _packageDownloader.DownloadPackageAsync(ModuleName, Version, Force.IsPresent, cancellationToken);
             WriteObject(filePath);
         }
-        catch (HttpRequestException ex) { 
+        catch (HttpRequestException ex)
+        {
             _logger.LogError("Failed to get module package, status code: {StatusCode}", ex.StatusCode);
             WriteError(new ErrorRecord(ex, "GetModulePackageFailed", ErrorCategory.InvalidOperation, null));
             return;

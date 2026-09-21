@@ -40,6 +40,12 @@ public enum TargetFramework
     /// .NET 9.0
     /// </summary>
     Net90,
+
+    /// <summary>
+    /// Unversioned "netCore" folder (used by e.g. ExchangeOnlineManagement alongside a "netFramework" folder).
+    /// Treated as the lowest-priority compatible framework.
+    /// </summary>
+    NetCore,
 }
 
 /// <summary>
@@ -58,6 +64,7 @@ public static class TargetFrameworkExtensions
         TargetFramework.Net70 => "net7.0",
         TargetFramework.Net80 => "net8.0",
         TargetFramework.Net90 => "net9.0",
+        TargetFramework.NetCore => "netCore",
         _ => throw new ArgumentOutOfRangeException(nameof(tf), tf, "Unknown target framework"),
     };
 
@@ -85,6 +92,7 @@ public static class TargetFrameworkExtensions
             "net7.0" => TargetFramework.Net70,
             "net8.0" => TargetFramework.Net80,
             "net9.0" => TargetFramework.Net90,
+            "netcore" or "coreclr" => TargetFramework.NetCore,
             _ => default,
         };
 
@@ -97,12 +105,13 @@ public static class TargetFrameworkExtensions
     /// </summary>
     public static int GetVersionPriority(this TargetFramework tf) => tf switch
     {
-        TargetFramework.NetCore31 => 1,
-        TargetFramework.Net50 => 2,
-        TargetFramework.Net60 => 3,
-        TargetFramework.Net70 => 4,
-        TargetFramework.Net80 => 5,
-        TargetFramework.Net90 => 6,
+        TargetFramework.NetCore => 1,
+        TargetFramework.NetCore31 => 2,
+        TargetFramework.Net50 => 3,
+        TargetFramework.Net60 => 4,
+        TargetFramework.Net70 => 5,
+        TargetFramework.Net80 => 6,
+        TargetFramework.Net90 => 7,
         _ => 0,
     };
 }
