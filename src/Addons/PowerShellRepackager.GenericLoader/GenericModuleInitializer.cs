@@ -19,6 +19,7 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
 {
     private static GenericAssemblyLoadContext? s_alc;
     private static object s_lock = new();
+    private const string StartupMessageFormat = "This module is repackaged using PowerShellRepackager by @svrooij.\r\n  For more information, visit: https://github.com/svrooij/PowerShellRepackager\r\n  Loader assembly: {0}, Version: {1}\r\n  Location: {2}";
 
     /// <summary>
     /// Called by PowerShell when a module using this loader is imported.
@@ -35,7 +36,11 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
             try
             {
                 // Get the location of this loader assembly.
-                string loaderAssemblyPath = typeof(GenericModuleInitializer).Assembly.Location;
+                var assembly = typeof(GenericModuleInitializer).Assembly;
+                var version = assembly.GetName().Version;                
+                string loaderAssemblyPath = assembly.Location;
+                var startupMessage = string.Format(StartupMessageFormat, assembly.GetName().Name, version, loaderAssemblyPath);
+                Console.WriteLine(startupMessage);
 
                 // Load the configuration for this specific repackaged module.
                 LoaderConfiguration config = ConfigurationLoader.LoadConfiguration(loaderAssemblyPath);
@@ -61,7 +66,7 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
                 // Attempt to write to PowerShell's error stream if available.
                 try
                 {
-                    System.Diagnostics.Debug.WriteLine(message);
+                    Console.Error.WriteLine(message);
                 }
                 catch
                 {
