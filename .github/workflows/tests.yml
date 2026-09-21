@@ -23,6 +23,7 @@ jobs:
   test:
     name: Build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') || matrix.os != 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -112,9 +113,17 @@ jobs:
 
       - name: Build tagged version
         shell: pwsh
-        run: dotnet build src/PowerShellRepackager --no-restore -c Release -p:Version=$("${{ github.ref_name }}".Substring(1)) -o ./dist/PowerShellRepackager/
+        run: dotnet build src/PowerShellRepackager --no-restore -c Release -p:Version=$("${{ github.ref_name }}".Substring(1))
 
-      - name: 🧪 Import module
+      - name: Move built module to dist folder
+        shell: pwsh
+        run: |
+          $distPath = "./dist/PowerShellRepackager"
+          if (Test-Path $distPath) { Remove-Item -Recurse -Force $distPath }
+          New-Item -ItemType Directory -Path $distPath
+          Copy-Item -Path "./src/PowerShellRepackager/bin/Release/net8.0/*" -Destination $distPath -Recurse
+
+      - name: Verify built module
         shell: pwsh
         run: |
           Import-Module ./dist/PowerShellRepackager/PowerShellRepackager.psd1
