@@ -40,7 +40,7 @@ public class ModuleRepackager
         string repackagedModuleName,
         string? outputPath,
         CancellationToken cancellationToken = default)
-        => await RepackageModuleAsync(extractedInfo, repackagedModuleName, outputPath, null, null, cancellationToken);
+        => await RepackageModuleAsync(extractedInfo, repackagedModuleName, outputPath, null, null, null, cancellationToken);
 
     /// <summary>
     /// Repackages a module, with explicit overrides for assembly isolation.
@@ -55,12 +55,17 @@ public class ModuleRepackager
         ModulePackageInfo extractedInfo,
         string repackagedModuleName,
         string? outputPath,
+        string? repackagedModuleVersion,
         string[]? isolateAssemblies,
         string[]? sharedAssemblies,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting repackaging: {Module} v{Version} → {NewName}",
             extractedInfo.ModuleName, extractedInfo.Version, repackagedModuleName);
+
+        var effectivePackageVersion = string.IsNullOrWhiteSpace(repackagedModuleVersion)
+            ? extractedInfo.Version
+            : repackagedModuleVersion;
 
         // Determine output base directory
         var baseOutputPath = string.IsNullOrWhiteSpace(outputPath)
@@ -126,7 +131,7 @@ public class ModuleRepackager
             moduleOutputDir,
             repackagedModuleName,
             newModuleGuid,
-            extractedInfo.Version,
+            effectivePackageVersion,
             cancellationToken);
         _logger.LogInformation("Rewrote manifest: {Path}", rewrittenManifestPath);
 
