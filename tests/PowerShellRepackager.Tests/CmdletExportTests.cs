@@ -1,6 +1,7 @@
+using System.IO;
 using System.Diagnostics;
 using System.Text.Json;
-using Xunit;
+using System.Threading.Tasks;
 
 namespace PowerShellRepackager.Tests;
 
@@ -191,7 +192,8 @@ public sealed class RepackagedTeamsFixture : IDisposable
 /// Integration tests that repackage MicrosoftTeams 7.9.0 and validate the resulting module.
 /// Requires PowerShell 7.4+ (pwsh) and network access to the PowerShell Gallery.
 /// </summary>
-public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
+[ClassDataSource<RepackagedTeamsFixture>(Shared = SharedType.PerClass)]
+public class CmdletExportTests
 {
     private readonly RepackagedTeamsFixture _fixture;
 
@@ -200,8 +202,8 @@ public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
         _fixture = fixture;
     }
 
-    [Fact]
-    public void RepackagedModule_ShouldExportCmdlets()
+    [Test]
+    public async Task RepackagedModule_ShouldExportCmdlets()
     {
         // Arrange
         var script = $$"""
@@ -221,31 +223,29 @@ public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
         var (exitCode, stdout, stderr) = _fixture.RunPwsh(script);
 
         // Assert
-        Assert.True(exitCode == 0,
-            $"Importing repackaged module failed (exit code {exitCode}).{Environment.NewLine}STDOUT:{Environment.NewLine}{stdout}{Environment.NewLine}STDERR:{Environment.NewLine}{stderr}{Environment.NewLine}Repackage output:{Environment.NewLine}{_fixture.RepackageOutput}");
+        await Assert.That(exitCode == 0).IsTrue().Because($"Importing repackaged module failed (exit code {exitCode}).{Environment.NewLine}STDOUT:{Environment.NewLine}{stdout}{Environment.NewLine}STDERR:{Environment.NewLine}{stderr}{Environment.NewLine}Repackage output:{Environment.NewLine}{_fixture.RepackageOutput}");
 
         var jsonLine = stdout
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .LastOrDefault(l => l.TrimStart().StartsWith('{'));
-        Assert.False(string.IsNullOrWhiteSpace(jsonLine), $"No JSON output from pwsh.{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
+        await Assert.That(string.IsNullOrWhiteSpace(jsonLine)).IsFalse().Because($"No JSON output from pwsh.{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
 
         using var doc = JsonDocument.Parse(jsonLine!);
         var root = doc.RootElement;
 
-        Assert.Equal(RepackagedTeamsFixture.NewModuleName, root.GetProperty("Name").GetString());
-        Assert.Equal(RepackagedTeamsFixture.OriginalModuleVersion, root.GetProperty("Version").GetString());
+        await Assert.That(root.GetProperty("Name").GetString()).IsEqualTo(RepackagedTeamsFixture.NewModuleName);
+        await Assert.That(root.GetProperty("Version").GetString()).IsEqualTo(RepackagedTeamsFixture.OriginalModuleVersion);
 
         var commands = root.GetProperty("Commands").EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.True(commands.Count > 0,
-            $"Repackaged module exported no commands.{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
+        await Assert.That(commands.Count > 0).IsTrue().Because($"Repackaged module exported no commands.{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
 
-        Assert.Contains("Connect-MicrosoftTeams", commands);
-        Assert.Contains("Get-Team", commands);
-        Assert.Contains("Get-CsOnlineUser", commands);
+        await Assert.That(commands).Contains("Connect-MicrosoftTeams");
+        await Assert.That(commands).Contains("Get-Team");
+        await Assert.That(commands).Contains("Get-CsOnlineUser");
     }
 
-    [Fact]
-    public void RepackagedModule_ManifestShouldBeValid()
+    [Test]
+    public async Task RepackagedModule_ManifestShouldBeValid()
     {
         // Arrange
         var script = $$"""
@@ -269,87 +269,82 @@ public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
         var (exitCode, stdout, stderr) = _fixture.RunPwsh(script);
 
         // Assert
-        Assert.True(exitCode == 0,
-            $"Test-ModuleManifest failed (exit code {exitCode}).{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
-        Assert.Contains($"NAME={RepackagedTeamsFixture.NewModuleName}", stdout);
-        Assert.Contains("GUID=2807", stdout);
-        Assert.Contains("PSVERSION=7.4", stdout);
-        Assert.Contains("EDITIONS=Core", stdout);
-        Assert.Contains("AUTHOR=Stephan van Rooij", stdout);
-        Assert.Contains("PROJECTURI=https://github.com/svrooij/PowerShellRepackager/blob/main/docs/modules/MicrosoftTeams.md", stdout);
-        Assert.Matches("LICENSEURI=https?://", stdout);
-        Assert.Contains("HELPURI=\r\n", stdout.Replace("\n", "\r\n").Replace("\r\r", "\r"));
-        Assert.Contains("Repackaged", stdout);
-        Assert.Contains("PSEdition_Core", stdout);
-        Assert.DoesNotContain("PSEdition_Desktop", stdout);
-        Assert.Contains("DESCRIPTION=Repackaged version of MicrosoftTeams 7.9.0 by Microsoft Corporation", stdout);
-        Assert.Contains("README=True", stdout);
-        Assert.Contains("HEADER=# Original Module: MicrosoftTeams v7.9.0", stdout);
+        await Assert.That(exitCode == 0).IsTrue().Because($"Test-ModuleManifest failed (exit code {exitCode}).{Environment.NewLine}{stdout}{Environment.NewLine}{stderr}");
+        await Assert.That(stdout).Contains($"NAME={RepackagedTeamsFixture.NewModuleName}");
+        await Assert.That(stdout).Contains("GUID=2807");
+        await Assert.That(stdout).Contains("PSVERSION=7.4");
+        await Assert.That(stdout).Contains("EDITIONS=Core");
+        await Assert.That(stdout).Contains("AUTHOR=Stephan van Rooij");
+        await Assert.That(stdout).Contains("PROJECTURI=https://github.com/svrooij/PowerShellRepackager/blob/main/docs/modules/MicrosoftTeams.md");
+        await Assert.That(stdout).Matches("LICENSEURI=https?://");
+        await Assert.That(stdout.Replace("\n", "\r\n").Replace("\r\r", "\r")).Contains("HELPURI=\r\n");
+        await Assert.That(stdout).Contains("Repackaged");
+        await Assert.That(stdout).Contains("PSEdition_Core");
+        await Assert.That(stdout).DoesNotContain("PSEdition_Desktop");
+        await Assert.That(stdout).Contains("DESCRIPTION=Repackaged version of MicrosoftTeams 7.9.0 by Microsoft Corporation");
+        await Assert.That(stdout).Contains("README=True");
+        await Assert.That(stdout).Contains("HEADER=# Original Module: MicrosoftTeams v7.9.0");
     }
 
-    [Fact]
-    public void RepackagedModule_ShouldContainRequiredFiles()
+    [Test]
+    public async Task RepackagedModule_ShouldContainRequiredFiles()
     {
         // Arrange
         var moduleDir = _fixture.RepackagedModuleDirectory;
 
         // Assert
-        Assert.True(File.Exists(_fixture.RepackagedManifestPath), $"Manifest missing: {_fixture.RepackagedManifestPath}");
-        Assert.Equal($"{RepackagedTeamsFixture.NewModuleName}.psd1", Path.GetFileName(_fixture.RepackagedManifestPath));
+        await Assert.That(File.Exists(_fixture.RepackagedManifestPath)).IsTrue().Because($"Manifest missing: {_fixture.RepackagedManifestPath}");
+        await Assert.That(Path.GetFileName(_fixture.RepackagedManifestPath)).IsEqualTo($"{RepackagedTeamsFixture.NewModuleName}.psd1");
 
         var binDir = Path.Combine(moduleDir, "bin");
-        Assert.True(Directory.Exists(binDir), $"bin directory missing: {binDir}");
-        Assert.True(File.Exists(Path.Combine(binDir, "Svrooij.PowerShellRepackager.GenericLoader.dll")), "Generic loader DLL missing from bin/");
-        Assert.True(File.Exists(Path.Combine(binDir, "loader-config.json")), "loader-config.json missing from bin/");
+        await Assert.That(Directory.Exists(binDir)).IsTrue().Because($"bin directory missing: {binDir}");
+        await Assert.That(File.Exists(Path.Combine(binDir, "Svrooij.PowerShellRepackager.GenericLoader.dll"))).IsTrue().Because("Generic loader DLL missing from bin/");
+        await Assert.That(File.Exists(Path.Combine(binDir, "loader-config.json"))).IsTrue().Because("loader-config.json missing from bin/");
 
         var dlls = Directory.GetFiles(binDir, "*.dll", SearchOption.AllDirectories);
-        Assert.True(dlls.Length > 1, "Expected bundled assemblies in bin/ besides the loader");
+        await Assert.That(dlls.Length > 1).IsTrue().Because("Expected bundled assemblies in bin/ besides the loader");
 
         var frameworkFolders = new[] { "net472", "net48", "net461", "net462", "desktop" };
         var offendingDirs = Directory.GetDirectories(moduleDir, "*", SearchOption.AllDirectories)
             .Where(d => frameworkFolders.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase))
             .ToList();
-        Assert.True(offendingDirs.Count == 0,
-            ".NET Framework folders should be excluded from the repackaged module: " + string.Join(", ", offendingDirs));
+        await Assert.That(offendingDirs.Count == 0).IsTrue();
     }
 
-    [Fact]
-    public void RepackagedModule_ShouldHaveGenericLoaderAsNestedModule()
+    [Test]
+    public async Task RepackagedModule_ShouldHaveGenericLoaderAsNestedModule()
     {
         // Arrange
         var manifestContent = File.ReadAllText(_fixture.RepackagedManifestPath);
 
         // Assert
-        Assert.Contains("Svrooij.PowerShellRepackager.GenericLoader.dll", manifestContent);
-        Assert.Matches(@"NestedModules\s*=\s*@\(", manifestContent);
+        await Assert.That(manifestContent).Contains("Svrooij.PowerShellRepackager.GenericLoader.dll");
+        await Assert.That(manifestContent).Matches(@"NestedModules\s*=\s*@\(");
 
         var loaderConfig = File.ReadAllText(Path.Combine(_fixture.RepackagedModuleDirectory, "bin", "loader-config.json"));
         using var doc = JsonDocument.Parse(loaderConfig);
         var preload = doc.RootElement.GetProperty("preloadAssemblies");
-        Assert.True(preload.GetArrayLength() > 0, "loader-config.json should list assemblies to preload");
+        await Assert.That(preload.GetArrayLength() > 0).IsTrue().Because("loader-config.json should list assemblies to preload");
     }
 
-    [Fact]
-    public void RepackagedModule_Pack_ShouldCreateValidNupkg()
+    [Test]
+    public async Task RepackagedModule_Pack_ShouldCreateValidNupkg()
     {
         // Assert package exists
-        Assert.False(string.IsNullOrWhiteSpace(_fixture.PackagePath),
-            $"Publish-RepackagedModule -Pack did not report a PackagePath.{Environment.NewLine}{_fixture.RepackageOutput}");
-        Assert.True(File.Exists(_fixture.PackagePath), $"Package missing: {_fixture.PackagePath}");
-        Assert.Equal(
-            $"{RepackagedTeamsFixture.NewModuleName}.{RepackagedTeamsFixture.OriginalModuleVersion}.nupkg",
-            Path.GetFileName(_fixture.PackagePath));
+        await Assert.That(string.IsNullOrWhiteSpace(_fixture.PackagePath)).IsFalse().Because($"Publish-RepackagedModule -Pack did not report a PackagePath.{Environment.NewLine}{_fixture.RepackageOutput}");
+        await Assert.That(File.Exists(_fixture.PackagePath)).IsTrue().Because($"Package missing: {_fixture.PackagePath}");
+        await Assert.That(Path.GetFileName(_fixture.PackagePath)).IsEqualTo($"{RepackagedTeamsFixture.NewModuleName}.{RepackagedTeamsFixture.OriginalModuleVersion}.nupkg");
 
         // Assert package structure
         using var archive = System.IO.Compression.ZipFile.OpenRead(_fixture.PackagePath!);
         var names = archive.Entries.Select(e => e.FullName).ToList();
 
-        Assert.Contains($"{RepackagedTeamsFixture.NewModuleName}.nuspec", names);
-        Assert.Contains("_rels/.rels", names);
-        Assert.Contains("[Content_Types].xml", names);
-        Assert.Contains($"{RepackagedTeamsFixture.NewModuleName}.psd1", names);
-        Assert.Contains("bin/Svrooij.PowerShellRepackager.GenericLoader.dll", names);
-        Assert.Contains("bin/loader-config.json", names);
+        await Assert.That(names).Contains($"{RepackagedTeamsFixture.NewModuleName}.nuspec");
+        await Assert.That(names).Contains("_rels/.rels");
+        await Assert.That(names).Contains("[Content_Types].xml");
+        await Assert.That(names).Contains($"{RepackagedTeamsFixture.NewModuleName}.psd1");
+        await Assert.That(names).Contains("bin/Svrooij.PowerShellRepackager.GenericLoader.dll");
+        await Assert.That(names).Contains("bin/loader-config.json");
 
         // Assert nuspec metadata
         using var nuspecStream = archive.GetEntry($"{RepackagedTeamsFixture.NewModuleName}.nuspec")!.Open();
@@ -357,14 +352,14 @@ public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
         var ns = nuspec.Root!.Name.Namespace;
         var metadata = nuspec.Root.Element(ns + "metadata")!;
 
-        Assert.Equal(RepackagedTeamsFixture.NewModuleName, metadata.Element(ns + "id")!.Value);
-        Assert.Equal(RepackagedTeamsFixture.OriginalModuleVersion, metadata.Element(ns + "version")!.Value);
-        Assert.False(string.IsNullOrWhiteSpace(metadata.Element(ns + "description")?.Value));
-        Assert.Contains("PSModule", metadata.Element(ns + "tags")!.Value.Split(' '));
+        await Assert.That(metadata.Element(ns + "id")!.Value).IsEqualTo(RepackagedTeamsFixture.NewModuleName);
+        await Assert.That(metadata.Element(ns + "version")!.Value).IsEqualTo(RepackagedTeamsFixture.OriginalModuleVersion);
+        await Assert.That(string.IsNullOrWhiteSpace(metadata.Element(ns + "description")?.Value)).IsFalse();
+        await Assert.That(metadata.Element(ns + "tags")!.Value.Split(' ')).Contains("PSModule");
     }
 
-    [Fact]
-    public void RepackagedModule_Publish_WithoutApiKey_ShouldReportError()
+    [Test]
+    public async Task RepackagedModule_Publish_WithoutApiKey_ShouldReportError()
     {
         // Arrange - re-run publish against the already extracted package with no API key available
         var script = $$"""
@@ -382,7 +377,7 @@ public class CmdletExportTests : IClassFixture<RepackagedTeamsFixture>
         var (_, stdout, stderr) = _fixture.RunPwsh(script);
 
         // Assert
-        Assert.Contains("ERROR_ID=PublishApiKeyMissing", stdout);
-        Assert.Contains("PUBLISHED=" + Environment.NewLine, stdout + Environment.NewLine);
+        await Assert.That(stdout).Contains("ERROR_ID=PublishApiKeyMissing");
+        await Assert.That(stdout + Environment.NewLine).Contains("PUBLISHED=" + Environment.NewLine);
     }
 }

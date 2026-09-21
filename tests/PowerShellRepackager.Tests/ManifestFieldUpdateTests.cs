@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using Xunit;
+using System.Threading.Tasks;
 
 namespace PowerShellRepackager.Tests;
 
@@ -12,8 +12,8 @@ public class ManifestFieldUpdateTests
     /// <summary>
     /// Test that array fields are not wrapped in extra quotes.
     /// </summary>
-    [Fact]
-    public void UpdateField_WithArrayValue_ShouldNotAddExtraQuotes()
+    [Test]
+    public async Task UpdateField_WithArrayValue_ShouldNotAddExtraQuotes()
     {
         // Arrange
         var manifest = @"@{
@@ -27,15 +27,15 @@ public class ManifestFieldUpdateTests
         var result = UpdateManifestField(manifest, fieldName, value);
 
         // Assert
-        Assert.Contains("NestedModules = @('bin/Loader.dll')", result);
-        Assert.DoesNotContain("NestedModules = '@('bin/Loader.dll')'", result);
+        await Assert.That(result).Contains("NestedModules = @('bin/Loader.dll')");
+        await Assert.That(result).DoesNotContain("NestedModules = '@('bin/Loader.dll')'");
     }
 
     /// <summary>
     /// Test that scalar fields are wrapped in quotes.
     /// </summary>
-    [Fact]
-    public void UpdateField_WithScalarValue_ShouldAddQuotes()
+    [Test]
+    public async Task UpdateField_WithScalarValue_ShouldAddQuotes()
     {
         // Arrange
         var manifest = @"@{
@@ -48,14 +48,14 @@ public class ManifestFieldUpdateTests
         var result = UpdateManifestField(manifest, fieldName, value);
 
         // Assert
-        Assert.Contains("RootModule = 'new.psm1'", result);
+        await Assert.That(result).Contains("RootModule = 'new.psm1'");
     }
 
     /// <summary>
     /// Test that field names are matched exactly, not partially.
     /// </summary>
-    [Fact]
-    public void UpdateField_ShouldNotMatchPartialFieldNames()
+    [Test]
+    public async Task UpdateField_ShouldNotMatchPartialFieldNames()
     {
         // Arrange
         var manifest = @"@{
@@ -69,15 +69,15 @@ public class ManifestFieldUpdateTests
         var result = UpdateManifestField(manifest, fieldName, value);
 
         // Assert - NestedModules should be added, Module should remain unchanged
-        Assert.Contains("NestedModules = @('bin/Loader.dll')", result);
-        Assert.Contains("Module = 'something'", result);
+        await Assert.That(result).Contains("NestedModules = @('bin/Loader.dll')");
+        await Assert.That(result).Contains("Module = 'something'");
     }
 
     /// <summary>
     /// Test that existing field values are replaced correctly.
     /// </summary>
-    [Fact]
-    public void UpdateField_WhenFieldExists_ShouldReplaceValue()
+    [Test]
+    public async Task UpdateField_WhenFieldExists_ShouldReplaceValue()
     {
         // Arrange
         var manifest = @"@{
@@ -91,15 +91,15 @@ public class ManifestFieldUpdateTests
         var result = UpdateManifestField(manifest, fieldName, value);
 
         // Assert
-        Assert.Contains("NestedModules = @('new.dll')", result);
-        Assert.DoesNotContain("NestedModules = @('old.dll')", result);
+        await Assert.That(result).Contains("NestedModules = @('new.dll')");
+        await Assert.That(result).DoesNotContain("NestedModules = @('old.dll')");
     }
 
     /// <summary>
     /// Test that field removal works correctly and doesn't leave orphaned lines.
     /// </summary>
-    [Fact]
-    public void RemoveField_ShouldRemoveEntireFieldLine()
+    [Test]
+    public async Task RemoveField_ShouldRemoveEntireFieldLine()
     {
         // Arrange
         var manifest = @"@{
@@ -113,16 +113,16 @@ public class ManifestFieldUpdateTests
         var result = RemoveManifestField(manifest, fieldName);
 
         // Assert
-        Assert.DoesNotContain("ModuleName", result);
-        Assert.Contains("RootModule = 'module.psm1'", result);
-        Assert.Contains("GUID = '12345678'", result);
+        await Assert.That(result).DoesNotContain("ModuleName");
+        await Assert.That(result).Contains("RootModule = 'module.psm1'");
+        await Assert.That(result).Contains("GUID = '12345678'");
     }
 
     /// <summary>
     /// Test that nested PrivateData fields are not accidentally matched.
     /// </summary>
-    [Fact]
-    public void UpdateField_ShouldNotMatchNestedFields()
+    [Test]
+    public async Task UpdateField_ShouldNotMatchNestedFields()
     {
         // Arrange
         var manifest = @"@{
@@ -140,15 +140,15 @@ public class ManifestFieldUpdateTests
         // Assert - Only root level NestedModules should be updated
         var lines = result.Split('\n');
         var rootNestedModulesLine = lines.FirstOrDefault(l => l.TrimStart().StartsWith("NestedModules"));
-        Assert.NotNull(rootNestedModulesLine);
-        Assert.Contains("@('loader.dll')", rootNestedModulesLine);
+        await Assert.That(rootNestedModulesLine).IsNotNull();
+        await Assert.That(rootNestedModulesLine).Contains("@('loader.dll')");
     }
 
     /// <summary>
     /// Test realistic MicrosoftTeams manifest scenario.
     /// </summary>
-    [Fact]
-    public void RealisticTeamsManifest_ShouldUpdateCorrectly()
+    [Test]
+    public async Task RealisticTeamsManifest_ShouldUpdateCorrectly()
     {
         // Arrange - Simulated Teams manifest
         var manifest = @"@{
@@ -175,11 +175,11 @@ public class ManifestFieldUpdateTests
         result = RemoveManifestField(result, "ModuleName"); // ModuleName should have been removed
 
         // Assert
-        Assert.Contains("RootModule = 'RepackagedModule.psm1'", result);
-        Assert.Contains("GUID = 'new-guid-12345'", result);
-        Assert.Contains("NestedModules = @('bin/Loader.dll')", result);
-        Assert.DoesNotContain("VariablesToExport = 'Teams'", result); // ModuleName was removed, not VariablesToExport
-        Assert.Contains("CmdletsToExport = '*'", result); // Other fields unchanged
+        await Assert.That(result).Contains("RootModule = 'RepackagedModule.psm1'");
+        await Assert.That(result).Contains("GUID = 'new-guid-12345'");
+        await Assert.That(result).Contains("NestedModules = @('bin/Loader.dll')");
+        await Assert.That(result).DoesNotContain("VariablesToExport = 'Teams'"); // ModuleName was removed, not VariablesToExport
+        await Assert.That(result).Contains("CmdletsToExport = '*'"); // Other fields unchanged
     }
 
     // ===== Helper Methods (mirroring the actual implementation) =====
@@ -187,8 +187,8 @@ public class ManifestFieldUpdateTests
     /// <summary>
     /// Test that commented-out fields are not matched, so the field is added exactly once.
     /// </summary>
-    [Fact]
-    public void UpdateField_ShouldIgnoreCommentedLines_AndAddFieldOnce()
+    [Test]
+    public async Task UpdateField_ShouldIgnoreCommentedLines_AndAddFieldOnce()
     {
         // Arrange
         var manifest = @"@{
@@ -202,9 +202,9 @@ public class ManifestFieldUpdateTests
 
         // Assert
         var uncommentedMatches = Regex.Matches(result, @"^\s*NestedModules\s*=", RegexOptions.Multiline);
-        Assert.Single(uncommentedMatches);
-        Assert.Contains("# NestedModules = @()", result);
-        Assert.Contains("#NestedModules = @()", result);
+        await Assert.That(uncommentedMatches).HasSingleItem();
+        await Assert.That(result).Contains("# NestedModules = @()");
+        await Assert.That(result).Contains("#NestedModules = @()");
     }
 
     private static string UpdateManifestField(string manifestContent, string fieldName, string value)

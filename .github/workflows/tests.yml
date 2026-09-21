@@ -67,31 +67,11 @@ jobs:
 
       - name: Test
         run: >
-          dotnet test PowerShellRepackager.slnx
-          --configuration Release
-          --no-build
-          --logger "trx;LogFileName=test-results.trx"
-          --results-directory TestResults
+          dotnet run --project tests/PowerShellRepackager.Tests/PowerShellRepackager.Tests.csproj --no-build --configuration Release --coverage --report-trx
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           TMPDIR: ${{ runner.temp }}
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: test-results-${{ matrix.os }}
-          path: TestResults/*.trx
-
-      - name: Publish test report
-        if: always()
-        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2
-        with:
-          name: Test results (${{ matrix.os }})
-          path: TestResults/*.trx
-          reporter: dotnet-trx
-          fail-on-error: false
 
   release:
     name: Release
