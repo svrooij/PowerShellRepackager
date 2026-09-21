@@ -5,9 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>PowerShellRepackager</AssemblyName>
-	  <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-	  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-	  <GenerateDocumentationFile>True</GenerateDocumentationFile>
+	<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	<GenerateDocumentationFile>True</GenerateDocumentationFile>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <NoWarn>CS8618</NoWarn>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
@@ -48,8 +48,8 @@
 
   <!-- Build and copy the generic loader BEFORE compile -->
   <Target Name="PrepareGenericLoader" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists($(EmbeddedLoaderDllPath))" Outputs="$(EmbeddedLoaderDllPath)">
-    <!-- Build the generic loader project in Release configuration -->
-    <Exec Command="dotnet build &quot;$(GenericLoaderProjectPath)&quot; -c Release -f net8.0" ContinueOnError="true" />
+    <!-- Build the generic loader project in Release configuration, passing through version properties -->
+    <Exec Command="dotnet build &quot;$(GenericLoaderProjectPath)&quot; -c Release -f net8.0 -p:Version=$(Version) -p:FileVersion=$(FileVersion) -p:InformationalVersion=$(InformationalVersion)" ContinueOnError="true" />
 
     <!-- Create the resources directory -->
     <MakeDir Directories="$(EmbeddedLoaderResourcePath)" />

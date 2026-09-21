@@ -17,6 +17,10 @@ public class ModuleRepackager
 {
     private readonly ILogger<ModuleRepackager> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ModuleRepackager"/> class with the specified logger.
+    /// </summary>
+    /// <param name="logger"></param>
     public ModuleRepackager(ILogger<ModuleRepackager> logger)
     {
         _logger = logger;
@@ -41,8 +45,12 @@ public class ModuleRepackager
     /// <summary>
     /// Repackages a module, with explicit overrides for assembly isolation.
     /// </summary>
+    /// <param name="extractedInfo">Module extraction result from PackageExtractor</param>
+    /// <param name="repackagedModuleName">Name for the new module (e.g., "Svrooij.MicrosoftTeams")</param>
+    /// <param name="outputPath">Base output directory. If null or empty, uses current directory</param>
     /// <param name="isolateAssemblies">Assembly names or wildcard patterns that must be isolated in the private ALC.</param>
     /// <param name="sharedAssemblies">Assembly names or wildcard patterns that must be loaded into the Default ALC.</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     public async Task<ModuleRepackageInfo> RepackageModuleAsync(
         ModulePackageInfo extractedInfo,
         string repackagedModuleName,
@@ -175,7 +183,7 @@ public class ModuleRepackager
     /// Parses the PowerShell module manifest (.psd1) to extract metadata.
     /// </summary>
     private async Task<ManifestData> ParseManifestAsync(
-        string manifestPath,
+        string? manifestPath,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(manifestPath) || !File.Exists(manifestPath))
@@ -1062,7 +1070,7 @@ catch {
     /// OR sets the generated .psm1 wrapper as RootModule for script-based modules.
     /// </summary>
     private async Task<string> RewriteManifestAsync(
-        string originalManifestPath,
+        string? originalManifestPath,
         ManifestData manifestData,
         string moduleOutputDir,
         string newModuleName,
@@ -1070,7 +1078,7 @@ catch {
         string packageVersion,
         CancellationToken cancellationToken)
     {
-        var manifestContent = !File.Exists(originalManifestPath)
+        var manifestContent = (string.IsNullOrEmpty(originalManifestPath) || !File.Exists(originalManifestPath))
             ? GetDefaultManifestTemplate(newModuleName, newGuid)
             : await File.ReadAllTextAsync(originalManifestPath, cancellationToken);
 

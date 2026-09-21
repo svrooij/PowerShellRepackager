@@ -201,7 +201,8 @@ public class ManifestFieldUpdateTests
         var result = UpdateManifestField(manifest, "NestedModules", "@('bin/Loader.dll')");
 
         // Assert
-        Assert.Equal(1, Regex.Matches(result, @"^\s*NestedModules\s*=", RegexOptions.Multiline).Count);
+        var uncommentedMatches = Regex.Matches(result, @"^\s*NestedModules\s*=", RegexOptions.Multiline);
+        Assert.Single(uncommentedMatches);
         Assert.Contains("# NestedModules = @()", result);
         Assert.Contains("#NestedModules = @()", result);
     }
