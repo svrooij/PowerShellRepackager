@@ -298,7 +298,7 @@ public class CmdletExportTests
 
         var binDir = Path.Combine(moduleDir, "bin");
         await Assert.That(Directory.Exists(binDir)).IsTrue().Because($"bin directory missing: {binDir}");
-        await Assert.That(File.Exists(Path.Combine(binDir, "Svrooij.PowerShellRepackager.GenericLoader.dll"))).IsTrue().Because("Generic loader DLL missing from bin/");
+        await Assert.That(File.Exists(Path.Combine(binDir, "Svrooij.MicrosoftTeams.Loader.dll"))).IsTrue().Because("Generic loader DLL missing from bin/");
         await Assert.That(File.Exists(Path.Combine(binDir, "loader-config.json"))).IsTrue().Because("loader-config.json missing from bin/");
 
         var dlls = Directory.GetFiles(binDir, "*.dll", SearchOption.AllDirectories);
@@ -318,7 +318,7 @@ public class CmdletExportTests
         var manifestContent = File.ReadAllText(_fixture.RepackagedManifestPath);
 
         // Assert
-        await Assert.That(manifestContent).Contains("Svrooij.PowerShellRepackager.GenericLoader.dll");
+        await Assert.That(manifestContent).Contains("Svrooij.MicrosoftTeams.Loader.dll");
         await Assert.That(manifestContent).Matches(@"NestedModules\s*=\s*@\(");
 
         var loaderConfig = File.ReadAllText(Path.Combine(_fixture.RepackagedModuleDirectory, "bin", "loader-config.json"));
@@ -346,7 +346,7 @@ public class CmdletExportTests
         await Assert.That(names.Count(n => string.Equals(n, "_rels/.rels", StringComparison.OrdinalIgnoreCase))).IsEqualTo(1);
         await Assert.That(names.Count(n => string.Equals(n, $"{RepackagedTeamsFixture.NewModuleName}.nuspec", StringComparison.OrdinalIgnoreCase))).IsEqualTo(1);
         await Assert.That(names).Contains($"{RepackagedTeamsFixture.NewModuleName}.psd1");
-        await Assert.That(names).Contains("bin/Svrooij.PowerShellRepackager.GenericLoader.dll");
+        await Assert.That(names).Contains("bin/Svrooij.MicrosoftTeams.Loader.dll");
         await Assert.That(names).Contains("bin/loader-config.json");
 
         // Assert nuspec metadata
