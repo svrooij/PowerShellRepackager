@@ -699,7 +699,7 @@ public class ModuleRepackager
 
                 // Don't copy the manifest here; we'll create a new one
                 var manifestFullPath = extractedInfo.ManifestFile?.FullPath;
-                if (!string.IsNullOrEmpty(manifestFullPath) && 
+                if (!string.IsNullOrEmpty(manifestFullPath) &&
                     otherFile.FullPath.Equals(manifestFullPath, StringComparison.OrdinalIgnoreCase))
                     continue;
 
@@ -931,8 +931,8 @@ public class ModuleRepackager
         };
 
         var configPath = Path.Combine(binDir, "loader-config.json");
-        var jsonOptions = new JsonSerializerOptions 
-        { 
+        var jsonOptions = new JsonSerializerOptions
+        {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
@@ -958,14 +958,14 @@ public class ModuleRepackager
         CancellationToken cancellationToken)
     {
         // Only generate a wrapper if the original module used a .psm1 RootModule
-        if (manifestData.IsBinaryModule || string.IsNullOrEmpty(manifestData.RootModule) || 
+        if (manifestData.IsBinaryModule || string.IsNullOrEmpty(manifestData.RootModule) ||
             !manifestData.RootModule.EndsWith(".psm1", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogDebug("Skipping .psm1 wrapper generation: original module uses binary RootModule or has no RootModule");
             return null;
         }
 
-        _logger.LogInformation("Generating .psm1 wrapper for module with original RootModule: {RootModule}", 
+        _logger.LogInformation("Generating .psm1 wrapper for module with original RootModule: {RootModule}",
             manifestData.RootModule);
 
         try
@@ -1170,7 +1170,7 @@ catch {
     private string DetermineRootModuleDll(ManifestData manifestData)
     {
         // If the original manifest specified a RootModule that's a DLL, use its filename
-        if (!string.IsNullOrEmpty(manifestData.RootModule) && 
+        if (!string.IsNullOrEmpty(manifestData.RootModule) &&
             manifestData.RootModule.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
         {
             var dllName = Path.GetFileName(manifestData.RootModule);
@@ -1197,19 +1197,19 @@ catch {
     /// </summary>
     private void EnsureExportLists(ref string manifestContent)
     {
-        var exportFields = new[] 
-        { 
-            "CmdletsToExport", 
-            "FunctionsToExport", 
-            "AliasesToExport", 
-            "VariablesToExport" 
+        var exportFields = new[]
+        {
+            "CmdletsToExport",
+            "FunctionsToExport",
+            "AliasesToExport",
+            "VariablesToExport"
         };
 
         foreach (var field in exportFields)
         {
             // Check if the field exists (ignoring commented-out lines)
             var pattern = $"^(?!\\s*#)\\s*{field}\\s*=";
-            var regex = new System.Text.RegularExpressions.Regex(pattern, 
+            var regex = new System.Text.RegularExpressions.Regex(pattern,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
             if (!regex.IsMatch(manifestContent))
@@ -1289,7 +1289,7 @@ catch {
         var pattern = $"(?m)^(?!\\s*#)\\s*{System.Text.RegularExpressions.Regex.Escape(fieldName)}\\s*=\\s*[^\r\n]*\\r?\\n?";
 
         var result = System.Text.RegularExpressions.Regex.Replace(
-            manifestContent, pattern, "", 
+            manifestContent, pattern, "",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         return result;

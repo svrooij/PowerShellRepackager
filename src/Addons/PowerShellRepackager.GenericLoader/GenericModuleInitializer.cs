@@ -37,7 +37,7 @@ public sealed class GenericModuleInitializer : IModuleAssemblyInitializer, IModu
             {
                 // Get the location of this loader assembly.
                 var assembly = typeof(GenericModuleInitializer).Assembly;
-                var version = assembly.GetName().Version;                
+                var version = assembly.GetName().Version;
                 string loaderAssemblyPath = assembly.Location;
                 var startupMessage = string.Format(StartupMessageFormat, assembly.GetName().Name, version, loaderAssemblyPath);
                 Console.WriteLine(startupMessage);

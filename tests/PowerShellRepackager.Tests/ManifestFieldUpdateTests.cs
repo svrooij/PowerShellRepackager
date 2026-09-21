@@ -234,7 +234,7 @@ public class ManifestFieldUpdateTests
         var pattern = $"(?m)^(?!\\s*#)\\s*{Regex.Escape(fieldName)}\\s*=\\s*[^\r\n]*\\r?\\n?";
 
         var result = Regex.Replace(
-            manifestContent, pattern, "", 
+            manifestContent, pattern, "",
             RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
         return result;

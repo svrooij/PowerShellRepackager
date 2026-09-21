@@ -8,7 +8,9 @@ namespace PowerShellRepackager.Loader;
 /// <summary>Handles module load/unload lifecycle and wires up the custom <see cref="PowerShellRepackagerAssemblyLoadContext"/>.</summary>
 public sealed class ModuleInitializer : IModuleAssemblyInitializer, IModuleAssemblyCleanup
 {
-    private static readonly PowerShellRepackagerAssemblyLoadContext s_alc = new();
+    private static PowerShellRepackagerAssemblyLoadContext? s_alc;
+    private static object s_lock = new();
+
 
     // Assemblies that PowerShell or other modules may load into the Default ALC before our
     // Resolving handler gets a chance to intercept. Pre-loading them into our private ALC
@@ -30,18 +32,40 @@ public sealed class ModuleInitializer : IModuleAssemblyInitializer, IModuleAssem
     /// <summary>Called by PowerShell when this module is imported. Registers the dependency resolver.</summary>
     public void OnImport()
     {
-        s_alc.Preload(s_preloadAssemblies);
-        AssemblyLoadContext.Default.Resolving += OnResolving;
+        lock (s_lock)
+        {
+            if (s_alc != null)
+                return;
+
+            s_alc = new PowerShellRepackagerAssemblyLoadContext();
+            s_alc.Preload(s_preloadAssemblies);
+            AssemblyLoadContext.Default.Resolving += OnResolving;
+        }
     }
 
     /// <summary>Called by PowerShell when this module is removed. Unregisters the dependency resolver.</summary>
     public void OnRemove(PSModuleInfo psModuleInfo)
     {
-        AssemblyLoadContext.Default.Resolving -= OnResolving;
+        lock (s_lock)
+        {
+            if (s_alc != null)
+            {
+                try
+                {
+                    AssemblyLoadContext.Default.Resolving -= OnResolving;
+                }
+                finally
+                {
+                    s_alc = null;
+                }
+            }
+        }
     }
 
     private static Assembly? OnResolving(AssemblyLoadContext defaultAlc, AssemblyName assemblyName)
     {
+        if (s_alc == null)
+            return null;
         return s_alc.ResolveFromDependencies(assemblyName);
     }
 }

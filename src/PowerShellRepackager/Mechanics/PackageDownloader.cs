@@ -19,7 +19,7 @@ internal class PackageDownloader
         ArgumentNullException.ThrowIfNull(logger, nameof(logger));
         ArgumentNullException.ThrowIfNull(httpClient, nameof(httpClient));
         _logger = logger;
-        _httpClient = httpClient;        
+        _httpClient = httpClient;
     }
 
     public async Task<string> DownloadPackageAsync(string moduleName, string version, bool force, CancellationToken cancellationToken)

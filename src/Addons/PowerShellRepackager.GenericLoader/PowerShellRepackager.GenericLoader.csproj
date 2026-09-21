@@ -5,6 +5,8 @@
 	<ImplicitUsings>enable</ImplicitUsings>
 	<AssemblyName>Svrooij.PowerShellRepackager.GenericLoader</AssemblyName>
 	<RootNamespace>Svrooij.PowerShellRepackager.GenericLoader</RootNamespace>
+	<Version>0.0.1</Version>
+	<FileVersion>0.0.1</FileVersion>
 
 	<Nullable>enable</Nullable>
 	<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
