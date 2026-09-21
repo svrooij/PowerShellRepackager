@@ -193,37 +193,88 @@ internal sealed class GenericAssemblyLoadContext : AssemblyLoadContext
     /// Resolves a bundled assembly for the Default ALC's Resolving event.
     /// Isolated dependencies are loaded into this private ALC; module-owned assemblies are loaded into
     /// the Default ALC so their types are visible to PowerShell scripts.
+    /// When multiple repackaged modules are imported, several loaders answer this event in registration
+    /// order. To avoid serving a too-old copy first, this handler only answers when its bundled copy
+    /// is at least the requested version; otherwise it returns null so another module's handler
+    /// (which may carry a newer copy) gets a chance.
     /// Unlike <see cref="LoadFromAssemblyName"/>, this never falls back to the Default ALC's own
     /// resolution, which would re-trigger the Default.Resolving event and cause infinite recursion.
     /// </summary>
     /// <param name="assemblyName">The assembly name to resolve.</param>
-    /// <returns>The loaded assembly, or null if not found in any search path.</returns>
+    /// <returns>The loaded assembly, or null if not found (or too old) in any search path.</returns>
     internal Assembly? ResolveFromBin(AssemblyName assemblyName)
     {
         if (assemblyName?.Name == null)
             return null;
 
         if (IsIsolated(assemblyName.Name))
+        {
+            var isolatedPath = FindAssemblyFile(assemblyName.Name);
+            if (isolatedPath == null || IsBundledCopyTooOld(isolatedPath, assemblyName))
+                return null;
+
             return ResolveIsolated(assemblyName);
+        }
 
         var existing = Default.Assemblies.FirstOrDefault(a => a.GetName().Name?.Equals(assemblyName.Name, StringComparison.OrdinalIgnoreCase) == true);
         if (existing != null)
+        {
+            // The Default ALC can only hold one assembly per simple name, so this is the only copy
+            // anyone can get; warn when it is older than requested to aid diagnosis.
+            var existingVersion = existing.GetName().Version;
+            if (assemblyName.Version != null && existingVersion != null && existingVersion < assemblyName.Version)
+            {
+                Console.WriteLine(
+                    $"Warning: '{assemblyName.Name}' {existingVersion} is already loaded in the Default ALC but {assemblyName.Version} was requested.");
+            }
+
             return existing;
+        }
 
         var path = FindAssemblyFile(assemblyName.Name);
-        if (path == null)
+        if (path == null || IsBundledCopyTooOld(path, assemblyName))
             return null;
 
         try
         {
-            System.Diagnostics.Debug.WriteLine($"Loading module-owned assembly '{assemblyName.Name}' into Default ALC from '{path}'");
+            Console.WriteLine($"Loading module-owned assembly '{assemblyName.Name}' into Default ALC from '{path}'");
             return Default.LoadFromAssemblyPath(path);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to load assembly '{assemblyName.Name}' from '{path}' into Default ALC: {ex.Message}");
+            Console.WriteLine($"Failed to load assembly '{assemblyName.Name}' from '{path}' into Default ALC: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Returns true when the bundled file at <paramref name="path"/> has a lower assembly version
+    /// than the requested one. Used only for Default ALC Resolving requests: this module's own
+    /// internal loads (via <see cref="Load"/>) always get the bundled copy regardless of version,
+    /// because that is the version the original module was shipped and tested with.
+    /// </summary>
+    private static bool IsBundledCopyTooOld(string path, AssemblyName requested)
+    {
+        if (requested.Version == null)
+            return false;
+
+        try
+        {
+            var bundledVersion = AssemblyName.GetAssemblyName(path).Version;
+            if (bundledVersion != null && bundledVersion < requested.Version)
+            {
+                Console.WriteLine(
+                    $"Not serving '{requested.Name}' from '{path}': bundled version {bundledVersion} is older than requested {requested.Version}; deferring to other resolvers.");
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            // If the file's identity cannot be read, fall back to serving it (previous behavior).
+            Console.WriteLine($"Could not read assembly identity from '{path}': {ex.Message}");
+        }
+
+        return false;
     }
 
     private Assembly? ResolveIsolated(AssemblyName assemblyName)

@@ -48,6 +48,7 @@ public class ModuleRepackager
     /// <param name="extractedInfo">Module extraction result from PackageExtractor</param>
     /// <param name="repackagedModuleName">Name for the new module (e.g., "Svrooij.MicrosoftTeams")</param>
     /// <param name="outputPath">Base output directory. If null or empty, uses current directory</param>
+    /// <param name="repackagedModuleVersion">Version for the new module (e.g., "1.0.0")</param>
     /// <param name="isolateAssemblies">Assembly names or wildcard patterns that must be isolated in the private ALC.</param>
     /// <param name="sharedAssemblies">Assembly names or wildcard patterns that must be loaded into the Default ALC.</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -124,6 +125,11 @@ public class ModuleRepackager
         // Generate new module GUID (repackaging creates a new identity), first four chars set to 2807
         var newModuleGuid = Guid.Parse("2807" + Guid.NewGuid().ToString("D")[4..]);
 
+        // Each repackaged module gets its own uniquely named copy of the generic loader, so multiple
+        // repackaged modules can be imported into the same PowerShell session without conflicts.
+        var loaderAssemblyName = AssemblyRenamer.BuildLoaderAssemblyName(extractedInfo.ModuleName);
+        var loaderFileName = $"{loaderAssemblyName}.dll";
+
         // Rewrite the manifest for the new module
         var rewrittenManifestPath = await RewriteManifestAsync(
             manifestPath,
@@ -132,6 +138,7 @@ public class ModuleRepackager
             repackagedModuleName,
             newModuleGuid,
             effectivePackageVersion,
+            loaderFileName,
             cancellationToken);
         _logger.LogInformation("Rewrote manifest: {Path}", rewrittenManifestPath);
 
@@ -143,7 +150,7 @@ public class ModuleRepackager
 
         // Determine which bundled assemblies are dependencies (isolated in the private ALC) versus
         // module-owned (loaded into the Default ALC so PowerShell scripts can resolve their types)
-        var isolatedAssemblies = await DetermineIsolatedAssembliesAsync(moduleOutputDir, isolateAssemblies, sharedAssemblies, cancellationToken);
+        var isolatedAssemblies = await DetermineIsolatedAssembliesAsync(moduleOutputDir, isolateAssemblies, sharedAssemblies, loaderAssemblyName, cancellationToken);
 
         // Generate loader configuration
         var loaderConfigPath = await GenerateLoaderConfigAsync(
@@ -154,8 +161,8 @@ public class ModuleRepackager
             cancellationToken);
         _logger.LogInformation("Generated loader config: {Path}", loaderConfigPath);
 
-        // Copy the generic loader DLL to bin/
-        var loaderDllPath = await CopyGenericLoaderAsync(binDir, cancellationToken);
+        // Copy the generic loader DLL to bin/ under its per-module name and rename its assembly identity
+        var loaderDllPath = await CopyGenericLoaderAsync(binDir, loaderAssemblyName, cancellationToken);
         _logger.LogInformation("Copied generic loader: {Path}", loaderDllPath);
 
         // Collect output statistics
@@ -797,6 +804,7 @@ public class ModuleRepackager
         string moduleOutputDir,
         string[]? isolatePatterns,
         string[]? sharedPatterns,
+        string loaderAssemblyName,
         CancellationToken cancellationToken)
     {
         var isolateOverrides = CreateWildcardPatterns(isolatePatterns);
@@ -823,7 +831,8 @@ public class ModuleRepackager
 
         foreach (var name in assemblyNames)
         {
-            if (name!.Equals("Svrooij.PowerShellRepackager.GenericLoader", StringComparison.OrdinalIgnoreCase))
+            if (name!.Equals("Svrooij.PowerShellRepackager.GenericLoader", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(loaderAssemblyName, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             if (isolateOverrides.Any(p => p.IsMatch(name)))
@@ -1081,10 +1090,11 @@ catch {
         string newModuleName,
         Guid newGuid,
         string packageVersion,
+        string loaderFileName,
         CancellationToken cancellationToken)
     {
         var manifestContent = (string.IsNullOrEmpty(originalManifestPath) || !File.Exists(originalManifestPath))
-            ? GetDefaultManifestTemplate(newModuleName, newGuid)
+            ? GetDefaultManifestTemplate(newModuleName, newGuid, loaderFileName)
             : await File.ReadAllTextAsync(originalManifestPath, cancellationToken);
 
         // The repackaged module is Core-only: collapse any `if ($PSEdition -eq 'Core') {...} else {...}` values
@@ -1118,7 +1128,7 @@ catch {
             // For binary modules: use the original DLL as RootModule, and generic loader as NestedModule
             var rootModuleDll = DetermineRootModuleDll(manifestData);
             manifestContent = UpdateManifestField(manifestContent, "RootModule", $"bin/{rootModuleDll}");
-            manifestContent = UpdateManifestField(manifestContent, "NestedModules", "@('bin/Svrooij.PowerShellRepackager.GenericLoader.dll')");
+            manifestContent = UpdateManifestField(manifestContent, "NestedModules", $"@('bin/{loaderFileName}')");
         }
         else
         {
@@ -1130,7 +1140,7 @@ catch {
                 // Use the generated .psm1 wrapper as RootModule
                 manifestContent = UpdateManifestField(manifestContent, "RootModule", $"{newModuleName}.psm1");
                 // Generic loader still goes in NestedModules so it's initialized before the wrapper runs
-                manifestContent = UpdateManifestField(manifestContent, "NestedModules", "@('bin/Svrooij.PowerShellRepackager.GenericLoader.dll')");
+                manifestContent = UpdateManifestField(manifestContent, "NestedModules", $"@('bin/{loaderFileName}')");
                 _logger.LogInformation("Set RootModule to generated .psm1 wrapper: {ModuleName}.psm1", newModuleName);
             }
             else
@@ -1139,7 +1149,7 @@ catch {
                 _logger.LogWarning("Failed to generate .psm1 wrapper, falling back to DLL-based RootModule");
                 var fallbackDll = DetermineRootModuleDll(manifestData);
                 manifestContent = UpdateManifestField(manifestContent, "RootModule", $"bin/{fallbackDll}");
-                manifestContent = UpdateManifestField(manifestContent, "NestedModules", "@('bin/Svrooij.PowerShellRepackager.GenericLoader.dll')");
+                manifestContent = UpdateManifestField(manifestContent, "NestedModules", $"@('bin/{loaderFileName}')");
             }
         }
 
@@ -1630,11 +1640,11 @@ catch {
     /// </summary>
     private async Task<string> CopyGenericLoaderAsync(
         string binDir,
+        string loaderAssemblyName,
         CancellationToken cancellationToken)
     {
         const string loaderResourceName = "PowerShellRepackager.Resources.Svrooij.PowerShellRepackager.GenericLoader.dll";
-        const string loaderFileName = "Svrooij.PowerShellRepackager.GenericLoader.dll";
-        var destPath = Path.Combine(binDir, loaderFileName);
+        var destPath = Path.Combine(binDir, $"{loaderAssemblyName}.dll");
 
         // Extract from embedded resource
         try
@@ -1645,9 +1655,15 @@ catch {
             if (resourceStream != null)
             {
                 _logger.LogInformation("Extracting generic loader from embedded resource");
-                await using var destStream = File.Create(destPath);
-                await resourceStream.CopyToAsync(destStream, cancellationToken);
-                _logger.LogInformation("Extracted generic loader to: {Dest}", destPath);
+                await using (var destStream = File.Create(destPath))
+                {
+                    await resourceStream.CopyToAsync(destStream, cancellationToken);
+                }
+
+                // Give this copy a unique assembly identity so multiple repackaged modules can be
+                // imported into the same PowerShell session (each gets its own loader + ALC + statics).
+                AssemblyRenamer.RenameAssembly(destPath, loaderAssemblyName);
+                _logger.LogInformation("Extracted generic loader to: {Dest} (assembly renamed to {Name})", destPath, loaderAssemblyName);
                 return destPath;
             }
         }
@@ -1667,12 +1683,12 @@ catch {
     /// Uses the RootModule + NestedModules pattern where the actual module DLL is the root,
     /// and the generic loader is a nested module that initializes the AssemblyLoadContext.
     /// </summary>
-    private string GetDefaultManifestTemplate(string moduleName, Guid guid)
+    private string GetDefaultManifestTemplate(string moduleName, Guid guid, string loaderFileName)
     {
         return $$"""
 @{
     RootModule = 'bin/{{moduleName}}.dll'
-    NestedModules = @('bin/Svrooij.PowerShellRepackager.GenericLoader.dll')
+    NestedModules = @('bin/{{loaderFileName}}')
     ModuleVersion = '1.0.0'
     GUID = '{{guid}}'
     Author = '{{RepackagedAuthor}}'
