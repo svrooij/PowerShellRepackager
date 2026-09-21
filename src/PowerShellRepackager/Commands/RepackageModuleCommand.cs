@@ -60,6 +60,12 @@ namespace PowerShellRepackager.Commands;
 /// Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.Contoso" -IsolateAssembly 'Microsoft.Graph.*' -SharedAssembly 'Contoso.Contracts'
 /// </code>
 /// </example>
+/// <example>
+/// <para type="name">Override the published module version</para>
+/// <code>
+/// Publish-RepackagedModule -ModuleInfo $extracted -NewModuleName "Svrooij.MicrosoftTeams" -ModuleVersion 7.9.0.1 -Pack
+/// </code>
+/// </example>
 [GenerateBindings]
 [Cmdlet(VerbsData.Publish, "RepackagedModule")]
 [OutputType(typeof(ModuleRepackageInfo))]
@@ -88,6 +94,14 @@ public partial class RepackageModuleCommand : DependencyCmdlet<Startup>
     /// </summary>
     [Parameter(Mandatory = false, Position = 2, ValueFromPipelineByPropertyName = true)]
     public string? OutputPath { get; set; }
+
+    /// <summary>
+    /// Optional version for the repackaged module and generated package.
+    /// When omitted, the original extracted module version is preserved.
+    /// Example: 7.9.0.1
+    /// </summary>
+    [Parameter(Mandatory = false, ValueFromPipelineByPropertyName = true)]
+    public Version? ModuleVersion { get; set; }
 
     /// <summary>
     /// Create a .nupkg of the repackaged module next to the output folder, without publishing it.
@@ -164,6 +178,7 @@ public partial class RepackageModuleCommand : DependencyCmdlet<Startup>
                 ModuleInfo,
                 NewModuleName,
                 OutputPath,
+                ModuleVersion?.ToString(),
                 IsolateAssembly,
                 SharedAssembly,
                 cancellationToken);

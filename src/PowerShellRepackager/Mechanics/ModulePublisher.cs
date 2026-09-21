@@ -89,6 +89,15 @@ internal class ModulePublisher
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(repackageInfo.OutputDirectory, file).Replace('\\', '/');
+
+                if (relativePath.Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase)
+                    || relativePath.StartsWith("_rels/", StringComparison.OrdinalIgnoreCase)
+                    || relativePath.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Skipping reserved NuGet package entry {Entry}", relativePath);
+                    continue;
+                }
+
                 archive.CreateEntryFromFile(file, relativePath, CompressionLevel.Optimal);
             }
         }

@@ -342,6 +342,9 @@ public class CmdletExportTests
         await Assert.That(names).Contains($"{RepackagedTeamsFixture.NewModuleName}.nuspec");
         await Assert.That(names).Contains("_rels/.rels");
         await Assert.That(names).Contains("[Content_Types].xml");
+        await Assert.That(names.Count(n => string.Equals(n, "[Content_Types].xml", StringComparison.OrdinalIgnoreCase))).IsEqualTo(1);
+        await Assert.That(names.Count(n => string.Equals(n, "_rels/.rels", StringComparison.OrdinalIgnoreCase))).IsEqualTo(1);
+        await Assert.That(names.Count(n => string.Equals(n, $"{RepackagedTeamsFixture.NewModuleName}.nuspec", StringComparison.OrdinalIgnoreCase))).IsEqualTo(1);
         await Assert.That(names).Contains($"{RepackagedTeamsFixture.NewModuleName}.psd1");
         await Assert.That(names).Contains("bin/Svrooij.PowerShellRepackager.GenericLoader.dll");
         await Assert.That(names).Contains("bin/loader-config.json");

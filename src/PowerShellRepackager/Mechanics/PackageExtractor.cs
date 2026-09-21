@@ -321,6 +321,7 @@ internal class PackageExtractor
 
         var rootFiles = Directory.EnumerateFiles(extractedPath, "*.*", SearchOption.TopDirectoryOnly)
             .Where(f => !f.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !Path.GetFileName(f).Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase))
             .Where(f => !f.Equals(mainManifestPath, StringComparison.OrdinalIgnoreCase));
 
         foreach (var file in rootFiles)
